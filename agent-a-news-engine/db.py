@@ -40,7 +40,7 @@ async def get_active_sources(supabase: Client) -> list:
 
 
 async def check_duplicate_url(supabase: Client, source_url: str) -> bool:
-    """이미 수집된 뉴스인지 source_url로 중복 체크
+    """이미 수집된 뉴스인지 source_url로 중복 체크 (단건 — 하위호환용)
     - True면 이미 있음 (중복)
     - False면 새 뉴스
     """
@@ -49,6 +49,24 @@ async def check_duplicate_url(supabase: Client, source_url: str) -> bool:
         .eq("source_url", source_url) \
         .execute()
     return len(response.data) > 0
+
+
+async def check_duplicate_urls_batch(supabase: Client, source_urls: list[str]) -> set[str]:
+    """여러 URL을 한 번의 IN 쿼리로 중복 체크 (배치 버전)
+    - N번 개별 쿼리 → 1번 IN 쿼리로 최대 500배 빠름
+    - 반환: 이미 DB에 있는 URL 집합 (set)
+    """
+    if not source_urls:
+        return set()
+
+    # Supabase에서 IN 쿼리: .in_("source_url", [...])
+    response = supabase.table("news") \
+        .select("source_url") \
+        .in_("source_url", source_urls) \
+        .execute()
+
+    existing = {row["source_url"] for row in (response.data or [])}
+    return existing
 
 
 async def save_news(supabase: Client, news_data: dict) -> dict:
