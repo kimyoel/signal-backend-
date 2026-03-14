@@ -4,7 +4,12 @@ whale_monitor.py — 고래 알림 감시 모듈 (Bitquery v2 API 사용)
 쉽게 말하면: 5분마다 Bitquery GraphQL API에 "큰 거래 있었어?" 하고 물어보고,
 있으면 우리 DB에 저장하는 파일.
 
-Whale Alert(유료) → Bitquery(무료 Developer Plan) 로 교체
+수정 내역 (v1.1):
+- EVM 쿼리: ISO8601DateTime → DateTime (v2 스키마 변경 대응)
+- BTC 쿼리: bitcoin{} v1 스키마 → UTXO(network: bitcoin) v2 스키마로 전면 교체
+- BTC USD 필터링: outputValueUsd (v1 필드 없음) → BTC 수량 임계값 + 실시간 BTC 가격으로 USD 환산
+
+WhaleAlert(유료) → Bitquery(무료 Developer Plan) 로 교체
 - 지원 체인: BTC, ETH, SOL, BSC 등 40개+
 - 무료 한도: 1k points/월, 실시간 스트림 2개, 웹훅 지원
 - API 문서: https://docs.bitquery.io
@@ -36,6 +41,10 @@ from db import supabase
 # ──────────────────────────────────────────────
 _last_cursor_time: datetime | None = None
 
+# BTC 가격 캐시 (1시간마다 갱신)
+_btc_price_cache: float = 80000.0  # 기본값 $80,000
+_btc_price_updated_at: datetime | None = None
+
 
 def _get_time_range() -> tuple[str, str]:
     """
@@ -55,6 +64,34 @@ def _get_time_range() -> tuple[str, str]:
     return since.strftime("%Y-%m-%dT%H:%M:%SZ"), now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _get_btc_price() -> float:
+    """
+    BTC 현재 가격 조회 (코인게코 무료 API).
+    1시간마다 갱신, 실패 시 캐시 값 사용.
+    """
+    global _btc_price_cache, _btc_price_updated_at
+
+    now = datetime.now(timezone.utc)
+    # 1시간 이내면 캐시 사용
+    if _btc_price_updated_at and (now - _btc_price_updated_at).seconds < 3600:
+        return _btc_price_cache
+
+    try:
+        resp = httpx.get(
+            "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd",
+            timeout=5,
+        )
+        resp.raise_for_status()
+        price = float(resp.json()["bitcoin"]["usd"])
+        _btc_price_cache = price
+        _btc_price_updated_at = now
+        print(f"[고래감시] BTC 가격 갱신: ${price:,.0f}")
+        return price
+    except Exception as e:
+        print(f"[고래감시] ⚠️ BTC 가격 조회 실패, 캐시 사용 (${_btc_price_cache:,.0f}): {e}")
+        return _btc_price_cache
+
+
 # ──────────────────────────────────────────────
 # 체인별 Bitquery 네트워크 이름 매핑
 # ──────────────────────────────────────────────
@@ -72,13 +109,16 @@ EVM_SYMBOLS = {"ETH", "USDT", "USDC"}
 
 def _fetch_evm_whales(since: str, till: str) -> list[dict]:
     """
-    Ethereum 체인의 대형 토큰 이동을 Bitquery로 조회.
+    Ethereum 체인의 대형 토큰 이동을 Bitquery v2로 조회.
     ETH, USDT, USDC 한 번에 가져옴.
+
+    수정: ISO8601DateTime → DateTime (Bitquery v2 스키마 변경)
     """
     min_usd = WHALE_MIN_VALUE_USD
 
+    # ✅ 수정: ISO8601DateTime → DateTime
     query = """
-    query WhaleTransfersEVM($since: ISO8601DateTime, $till: ISO8601DateTime, $minUsd: Float) {
+    query WhaleTransfersEVM($since: DateTime, $till: DateTime, $minUsd: Float) {
       EVM(network: eth) {
         Transfers(
           where: {
@@ -169,34 +209,48 @@ def _fetch_evm_whales(since: str, till: str) -> list[dict]:
 
 def _fetch_bitcoin_whales(since: str, till: str) -> list[dict]:
     """
-    Bitcoin 체인의 대형 트랜잭션을 Bitquery로 조회.
+    Bitcoin 체인의 대형 트랜잭션을 Bitquery v2로 조회.
+
+    수정 내역:
+    - v1: bitcoin { transactions(...) } → v2: UTXO(network: bitcoin) { Inputs(...) }
+    - ISO8601DateTime → DateTime
+    - outputValueUsd 없음 → BTC 수량 × 현재가로 USD 환산
+    - 트랜잭션 단위 집계: Input 기준으로 총 이동량 합산
     """
     if "BTC" not in WHALE_TRACKED_SYMBOLS:
         return []
 
-    min_usd = WHALE_MIN_VALUE_USD
+    btc_price = _get_btc_price()
+    # USD 기준 최소 금액을 BTC 수량으로 환산 (10% 여유)
+    min_btc = (WHALE_MIN_VALUE_USD / btc_price) * 0.9
 
+    # ✅ 수정: bitcoin{} v1 → UTXO(network: bitcoin) v2 스키마
+    # Input 기준으로 대형 송금 감지 (여러 Output으로 쪼개지는 UTXO 특성 고려)
     query = """
-    query WhaleBTC($since: ISO8601DateTime, $till: ISO8601DateTime, $minUsd: Float) {
-      bitcoin {
-        transactions(
-          options: {limit: 30, desc: "block.timestamp.time"}
-          date: {since: $since, till: $till}
-          outputCountGt: 0
+    query WhaleBTC($since: DateTime, $till: DateTime, $minBtc: Float) {
+      UTXO(network: bitcoin) {
+        Inputs(
+          where: {
+            Block: {Time: {since: $since, till: $till}}
+            Input: {Value: {ge: $minBtc}}
+          }
+          orderBy: {descending: Block_Time}
+          limit: {count: 30}
         ) {
-          block {
-            timestamp {
-              time(format: "%Y-%m-%dT%H:%M:%SZ")
+          Block {
+            Time
+            Height
+          }
+          Transaction {
+            Hash
+          }
+          Input {
+            Value
+            Index
+            TxIndex
+            Address {
+              Address
             }
-          }
-          hash
-          outputValue
-          outputValueUsd
-          inputAddress {
-            address
-          }
-          outputAddress {
-            address
           }
         }
       }
@@ -215,7 +269,7 @@ def _fetch_bitcoin_whales(since: str, till: str) -> list[dict]:
                 "variables": {
                     "since": since,
                     "till": till,
-                    "minUsd": min_usd,
+                    "minBtc": min_btc,
                 },
             },
             timeout=30,
@@ -230,29 +284,38 @@ def _fetch_bitcoin_whales(since: str, till: str) -> list[dict]:
         print(f"[고래감시-BTC] ⚠️ GraphQL 에러: {data['errors']}")
         return []
 
-    txs = data.get("data", {}).get("bitcoin", {}).get("transactions", [])
+    inputs = data.get("data", {}).get("UTXO", {}).get("Inputs", [])
     results = []
 
-    for tx in txs:
-        usd_val = float(tx.get("outputValueUsd") or 0)
-        if usd_val < min_usd:
+    # 같은 tx_hash 내 Input들을 합산 (중복 방지)
+    seen_hashes = set()
+
+    for inp in inputs:
+        tx_hash = inp["Transaction"]["Hash"]
+        if tx_hash in seen_hashes:
+            continue
+        seen_hashes.add(tx_hash)
+
+        btc_val = float(inp["Input"].get("Value") or 0)
+        usd_val = btc_val * btc_price
+
+        if usd_val < WHALE_MIN_VALUE_USD:
             continue
 
-        from_addr = (tx.get("inputAddress") or [{}])[0].get("address", "unknown")
-        to_addr = (tx.get("outputAddress") or [{}])[0].get("address", "unknown")
+        from_addr = inp["Input"].get("Address", {}).get("Address", "unknown") or "unknown"
 
         results.append({
             "blockchain": "bitcoin",
             "symbol": "BTC",
-            "amount": float(tx.get("outputValue") or 0),
+            "amount": btc_val,
             "amount_usd": usd_val,
             "from_address": from_addr,
-            "to_address": to_addr,
+            "to_address": "unknown",  # UTXO 모델: 여러 Output 주소로 분산됨
             "from_label": "unknown",
             "to_label": "unknown",
-            "tx_hash": tx["hash"],
-            "whale_alert_id": tx["hash"][:16],
-            "occurred_at": tx["block"]["timestamp"]["time"],
+            "tx_hash": tx_hash,
+            "whale_alert_id": tx_hash[:16],
+            "occurred_at": inp["Block"]["Time"],
         })
 
     return results
