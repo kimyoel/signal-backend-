@@ -441,15 +441,11 @@ async def save_to_db(news_items: list[dict]) -> list[dict]:
         content_type = item.get("content_type", "news")
         importance = item.get("importance", 3)
 
-        # Threads 포스팅 대상 결정
-        # - 뉴스/RSS: 중요도 5
-        # - 트위터/애널리스트: 중요도 4+
-        if content_type == "twitter":
-            post_to_threads = importance >= 4
-        elif content_type in ("analyst", "influencer"):
+        # Threads 포스팅 대상 결정 (Agent C와 동일하게 importance>=3 통일)
+        if content_type in ("twitter", "analyst", "influencer"):
             post_to_threads = importance >= 3
         else:
-            post_to_threads = importance >= 5
+            post_to_threads = importance >= 3
 
         records.append({
             "title": item.get("title", item.get("title_original", "")),
