@@ -51,3 +51,4 @@
 |------|----------|---------|
 | 2026-03-14 | 기존 Hono 삭제 + Python 에이전트 A 전체 구조 생성 | 6개 .py 파일 + 설정 파일 + 관리 파일 4종 |
 | 2026-03-14 | Python lint 통과 (pyflakes 에러 0) + README.md 작성 | Railway 배포 가이드 포함 |
+| 2026-03-14 | GitHub push 완료 — signal-backend 모노레포 구조 (A/B/C/E) | kimyoel/signal-backend- |
