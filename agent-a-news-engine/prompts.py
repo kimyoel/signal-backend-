@@ -129,21 +129,26 @@ Respond ONLY with valid JSON in this exact format:
 # ──────────────────────────────────────────
 TWITTER_SCORING_PROMPT = """You are scoring a tweet from a crypto/macro influencer for investment relevance.
 
-These tweets are from curated accounts: Saylor, PlanB, Willy Woo, Lyn Alden, Kobeissi Letter, etc.
+These tweets are from pre-curated expert accounts: Saylor, PlanB, Willy Woo, Lyn Alden, Kobeissi Letter, etc.
+These are NOT random tweets — they are from handpicked experts whose every market-related tweet has signal value.
 Short content is normal for tweets — score based on the signal value.
 
 SCORING CRITERIA FOR TWEETS:
 - 5: Breaking news announcement, major position disclosure, urgent market warning (e.g., "Just bought 10,000 BTC", "Fed emergency meeting called")
 - 4: Strong market signal or important data point (e.g., whale movement data, key technical level breach, new institutional development)
-- 3: Meaningful market commentary or insight worth tracking (e.g., macro observation, trend analysis, key metric update)
-- 2: General opinion or retweet without clear added value
-- 1: Meme, personal post, promotional, unrelated content
+- 3: Any market-related commentary, analysis, or opinion from these experts (macro observation, price levels, economic data, sentiment, predictions)
+- 2: Pure retweet without added comment, OR vague content with zero market signal
+- 1: Clearly off-topic: meme, personal life, promotional/ad content with zero investment relevance
 
-IMPORTANT: 
-- RT (retweet) without comment = usually 1~2 points
-- Data/chart tweet = usually 3~4 points  
-- Personal opinion tweet from high-credibility source = 3~4 points
+IMPORTANT — DEFAULT TO 3, NOT 2:
+- These accounts are pre-screened experts. When in doubt, score 3 (not 2).
+- If the tweet mentions ANY of: price levels, economic data, on-chain metrics, market trend, Fed/macro, crypto/stocks → minimum score 3
+- RT (retweet) WITHOUT any added comment = 1~2 points ONLY
+- RT WITH author's own comment or analysis = treat as original, score 3~4
+- Data/chart tweet = 3~4 points  
+- Personal opinion or market view from credible source = 3~4 points
 - Breaking news or position disclosure = 4~5 points
+- ONLY score 1~2 for: pure memes, personal life posts, promotional content, off-topic content
 
 EXAMPLES:
 ---
