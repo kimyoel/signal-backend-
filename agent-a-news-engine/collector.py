@@ -346,7 +346,7 @@ async def score_importance(news_items: list[dict]) -> list[dict]:
 
             item["importance"] = max(1, min(5, score))
             item["score_reason"] = reason
-            logger.debug(f"[채점] {content_type} | 점수:{score} | {reason[:50] if reason else 'N/A'}")
+            logger.info(f"[채점] {content_type} | 점수:{score} | {reason[:50] if reason else 'N/A'}")
 
         except Exception as e:
             logger.error(f"[채점] 오류: {e}")
