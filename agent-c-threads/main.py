@@ -218,6 +218,161 @@ def format_news_for_threads(news: dict) -> str:
 
 THREADS_MAX_LENGTH = 500  # Threads API 글자수 제한
 
+# ── 토큰 자동 갱신 관련 ───────────────────────────────────────────
+THREADS_TOKEN_REFRESH_THRESHOLD_DAYS = 15  # 만료 N일 전부터 갱신
+
+
+async def get_token_expiry(token: str) -> int:
+    """Threads API 디버그 엔드포인트로 만료시간(Unix timestamp) 조회"""
+    url = "https://graph.threads.net/debug_token"
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            resp = await client.get(url, params={"input_token": token, "access_token": token})
+            data = resp.json()
+            return data.get("data", {}).get("expires_at", 0)
+        except Exception as e:
+            logger.error(f"토큰 만료시간 조회 실패: {e}")
+            return 0
+
+
+async def refresh_threads_token(current_token: str) -> tuple:
+    """Threads 장기 토큰 갱신 → (새_토큰, 만료_timestamp) 반환. 실패시 ("", 0)"""
+    import time as _time
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            resp = await client.get(
+                "https://graph.threads.net/refresh_access_token",
+                params={"grant_type": "th_refresh_token", "access_token": current_token},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            new_token = data.get("access_token", "")
+            expires_in = data.get("expires_in", 0)
+            expiry_ts = int(_time.time()) + expires_in
+            logger.info(
+                f"✅ 토큰 갱신 성공! 새 만료일: "
+                f"{datetime.fromtimestamp(expiry_ts, tz=timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}"
+            )
+            return new_token, expiry_ts
+        except httpx.HTTPStatusError as e:
+            logger.error(f"토큰 갱신 실패 (HTTP {e.response.status_code}): {e.response.text}")
+            return "", 0
+        except Exception as e:
+            logger.error(f"토큰 갱신 오류: {e}")
+            return "", 0
+
+
+async def save_token_to_supabase(token: str, expires_at: int) -> bool:
+    """갱신된 토큰을 Supabase app_settings 테이블에 저장 (upsert)"""
+    if not supabase:
+        return False
+    try:
+        expiry_iso = datetime.fromtimestamp(expires_at, tz=timezone.utc).isoformat()
+        result = supabase.table("app_settings").upsert({
+            "key": "threads_access_token",
+            "value": token,
+            "expires_at": expiry_iso,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }).execute()
+        if result.data:
+            logger.info(f"✅ 토큰 Supabase 저장 완료 (만료: {expiry_iso})")
+            return True
+        logger.error("⚠️ Supabase 토큰 저장 실패 (data 없음)")
+        return False
+    except Exception as e:
+        logger.error(f"Supabase 토큰 저장 오류: {e}")
+        return False
+
+
+async def load_token_from_supabase() -> tuple:
+    """Supabase app_settings에서 저장된 토큰 로드 → (토큰, 만료_timestamp)"""
+    if not supabase:
+        return "", 0
+    try:
+        result = (
+            supabase.table("app_settings")
+            .select("value, expires_at")
+            .eq("key", "threads_access_token")
+            .execute()
+        )
+        if result.data:
+            row = result.data[0]
+            token = row.get("value", "")
+            expires_at_str = row.get("expires_at", "")
+            if expires_at_str:
+                dt = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
+                return token, int(dt.timestamp())
+        return "", 0
+    except Exception as e:
+        logger.error(f"Supabase 토큰 로드 오류: {e}")
+        return "", 0
+
+
+async def auto_refresh_token_job():
+    """
+    매일 실행되는 자동 갱신 Job
+    - 만료 15일 전이면 자동 갱신
+    - 갱신된 토큰을 메모리 + Supabase에 저장
+    """
+    global THREADS_ACCESS_TOKEN
+    import time as _time
+
+    logger.info("🔄 [토큰 점검] 만료 상태 확인 중...")
+
+    # Supabase 우선, 없으면 환경변수 사용
+    db_token, db_expires_ts = await load_token_from_supabase()
+    if db_token:
+        current_token, expires_ts = db_token, db_expires_ts
+        logger.info("Supabase에서 토큰 로드됨")
+    else:
+        current_token = THREADS_ACCESS_TOKEN
+        expires_ts = await get_token_expiry(current_token)
+        logger.info("환경변수 토큰 사용 — 만료일 API 조회")
+
+    if not current_token:
+        logger.error("❌ 사용 가능한 토큰 없음 — 수동 발급 필요")
+        return
+
+    now_ts = int(_time.time())
+    days_left = (expires_ts - now_ts) / 86400 if expires_ts else 0
+    logger.info(f"토큰 만료까지: {days_left:.1f}일")
+
+    if days_left <= THREADS_TOKEN_REFRESH_THRESHOLD_DAYS:
+        logger.info(f"⚡ 만료 {days_left:.1f}일 전 → 자동 갱신 시작")
+        new_token, new_expiry = await refresh_threads_token(current_token)
+        if new_token:
+            THREADS_ACCESS_TOKEN = new_token
+            await save_token_to_supabase(new_token, new_expiry)
+            new_days = (new_expiry - now_ts) / 86400
+            logger.info(f"✅ 자동 갱신 완료! 새 만료까지: {new_days:.0f}일")
+        else:
+            logger.error("❌ 자동 갱신 실패! 수동 갱신 필요")
+    else:
+        logger.info(f"✅ 토큰 양호 ({days_left:.0f}일 남음)")
+
+
+async def load_token_on_startup():
+    """
+    앱 시작시 Supabase에서 최신 토큰 로드
+    (환경변수보다 Supabase 우선 — 자동 갱신된 토큰 반영)
+    """
+    global THREADS_ACCESS_TOKEN
+    import time as _time
+
+    db_token, db_expires_ts = await load_token_from_supabase()
+    if db_token:
+        now_ts = int(_time.time())
+        days_left = (db_expires_ts - now_ts) / 86400 if db_expires_ts else -1
+        if days_left > 0:
+            THREADS_ACCESS_TOKEN = db_token
+            logger.info(f"✅ Supabase 토큰 로드 완료 (만료까지 {days_left:.0f}일)")
+        else:
+            logger.warning(f"⚠️ Supabase 토큰 만료됨 ({abs(days_left):.0f}일 전) — 환경변수 사용")
+    else:
+        logger.info("ℹ️ Supabase 토큰 없음 → 환경변수 THREADS_ACCESS_TOKEN 사용")
+
+
+
 def build_post_text(news: dict) -> str:
     """콘텐츠 타입에 따라 포맷 선택 + 500자 제한"""
     content_type = news.get("content_type", "news")
@@ -340,6 +495,9 @@ async def poll_and_post():
 async def lifespan(app: FastAPI):
     logger.info("🚀 Agent C 시작 — Threads 자동 포스터")
 
+    # 시작시 Supabase에서 최신 토큰 로드 (자동 갱신된 토큰 반영)
+    await load_token_on_startup()
+
     if THREADS_ACCESS_TOKEN and THREADS_USER_ID and supabase:
         scheduler.add_job(
             poll_and_post,
@@ -347,11 +505,21 @@ async def lifespan(app: FastAPI):
             id="poll_and_post",
             replace_existing=True,
         )
+        # 매일 09:00 UTC 토큰 만료 점검 + 자동 갱신
+        scheduler.add_job(
+            auto_refresh_token_job,
+            trigger="cron",
+            hour=9,
+            minute=0,
+            id="token_refresh",
+            replace_existing=True,
+        )
         scheduler.start()
-        logger.info(f"⏰ 스케줄러 시작 — {POLL_INTERVAL_SECONDS}초 간격")
+        logger.info(f"⏰ 스케줄러 시작 — 포스팅: {POLL_INTERVAL_SECONDS}초 간격, 토큰 점검: 매일 09:00 UTC")
 
-        # 시작 직후 1회 즉시 실행
+        # 시작 직후 즉시 실행
         asyncio.create_task(poll_and_post())
+        asyncio.create_task(auto_refresh_token_job())  # 시작시 즉시 점검
     else:
         logger.warning("⚠️  환경변수 미설정으로 스케줄러 비활성화")
 
@@ -364,7 +532,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="SIGNAL Agent C — Threads Auto Poster",
     description="중요도 3+ 뉴스 → Threads 자동 포스팅 (트위터 인용 + 뉴스 요약)",
-    version="2.1.0",
+    version="2.2.0",
     lifespan=lifespan,
 )
 
@@ -381,7 +549,7 @@ async def health():
     return {
         "status": "ok",
         "agent": "C",
-        "version": "2.1.0",
+        "version": "2.2.0",
         "scheduler": scheduler.running if scheduler else False,
         "supabase": supabase is not None,
         "threads_configured": bool(THREADS_ACCESS_TOKEN and THREADS_USER_ID),
@@ -430,6 +598,42 @@ async def test_post():
     else:
         return {"status": "error", "message": "테스트 포스트 발행 실패"}
 
+
+
+
+@app.get("/token-status")
+async def token_status():
+    """Threads 토큰 만료 상태 조회"""
+    import time as _time
+    db_token, db_expires_ts = await load_token_from_supabase()
+    current_token = db_token or THREADS_ACCESS_TOKEN
+    expires_ts = db_expires_ts if db_token else await get_token_expiry(current_token)
+
+    now_ts = int(_time.time())
+    days_left = (expires_ts - now_ts) / 86400 if expires_ts else None
+    source = "supabase" if db_token else "env_var"
+
+    return {
+        "token_source": source,
+        "expires_at": datetime.fromtimestamp(expires_ts, tz=timezone.utc).isoformat() if expires_ts else None,
+        "days_until_expiry": round(days_left, 1) if days_left is not None else None,
+        "needs_refresh": days_left is not None and days_left <= THREADS_TOKEN_REFRESH_THRESHOLD_DAYS,
+        "status": "ok" if (days_left and days_left > 0) else "expired",
+    }
+
+
+@app.post("/refresh-token")
+async def manual_token_refresh():
+    """수동 토큰 갱신 트리거 (긴급 상황용)"""
+    await auto_refresh_token_job()
+    db_token, db_expires_ts = await load_token_from_supabase()
+    import time as _time
+    now_ts = int(_time.time())
+    days_left = (db_expires_ts - now_ts) / 86400 if db_expires_ts else 0
+    return {
+        "status": "refreshed" if db_token else "failed",
+        "days_until_expiry": round(days_left, 1),
+    }
 
 if __name__ == "__main__":
     import uvicorn
