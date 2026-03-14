@@ -24,14 +24,14 @@
 
 ## Phase 2 — 안정화
 
+- [x] 에러 핸들링 강화 — 타임아웃 15초, 재시도 1회, 실패 격리 (2026-03-14)
+- [x] 테스트 코드 작성 — retry + error_handling 18개 테스트 전부 통과 (2026-03-14)
+- [ ] 로깅 시스템 구축 (structured logging)
 - [ ] Supabase 실제 연결 테스트
 - [ ] GPT-4o API 실제 호출 테스트
 - [ ] Gemini 1.5 Flash API 실제 호출 테스트
 - [ ] Grok-2 API 실제 호출 테스트
 - [ ] Claude Haiku 검증 실제 호출 테스트
-- [ ] 에러 핸들링 강화 (타임아웃, 재시도 로직)
-- [ ] 로깅 시스템 구축 (structured logging)
-- [ ] 테스트 코드 작성 (각 서비스별 unit test)
 - [ ] Railway 배포 + 실서버 테스트
 
 ## Phase 3 — 고도화
@@ -50,3 +50,4 @@
 |------|----------|---------|
 | 2026-03-14 | Phase 1 전체 완료 | 프로젝트 뼈대 생성. 실제 API 키 미설정 상태. |
 | 2026-03-14 | 관리 문서 4종 작성 | AGENT.md, plan.md, context.md, tasks.md |
+| 2026-03-14 | 에러 핸들링 강화 | retry.py, errors.py 신규 생성. ai_clients.py, main.py, analysis.py 수정. 18개 테스트 통과. |
