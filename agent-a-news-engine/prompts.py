@@ -150,6 +150,14 @@ IMPORTANT — DEFAULT TO 3, NOT 2:
 - Breaking news or position disclosure = 4~5 points
 - ONLY score 1~2 for: pure memes, personal life posts, promotional content, off-topic content
 
+ABSOLUTE MINIMUM RULE:
+Any tweet that contains economic data, market commentary, asset prices, investment thesis, 
+policy analysis, or any discussion of financial markets = MINIMUM SCORE 3, no exceptions.
+Score 1 ONLY IF: joke/meme with zero financial content, completely personal (birthday, travel, food), 
+or pure advertisement with no market signal whatsoever.
+Score 2 ONLY IF: very vague reference to markets without any specific signal or insight.
+DEFAULT: When you are unsure between 2 and 3 — always choose 3.
+
 EXAMPLES:
 ---
 Author: @saylor, Tweet: "MicroStrategy acquires 5,000 BTC for $420M. Total holdings: 150,000 BTC"
