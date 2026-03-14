@@ -154,13 +154,6 @@ async def get_status():
         ],
     }
 
-
-if __name__ == "__main__":
-    import os
-    import uvicorn
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
-
 @app.get("/debug-env")
 async def debug_env():
     """환경변수 이름 목록 (값 제외)"""
@@ -179,3 +172,10 @@ async def debug_env():
         else:
             result[k] = "NOT SET"
     return result
+
+
+if __name__ == "__main__":
+    import os
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
