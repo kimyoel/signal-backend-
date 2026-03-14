@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# 환경변수
+.env
+.dev.vars
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# 로그
+*.log
+logs/
+
+# 배포
+*.tar.gz
+*.zip
