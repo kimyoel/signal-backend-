@@ -16,6 +16,7 @@
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime, timezone
 
 import feedparser
@@ -393,7 +394,6 @@ async def translate_and_summarize(news_items: list[dict]) -> list[dict]:
             text = response.text.strip()
 
             # JSON 파싱 시도
-            import re
             json_match = re.search(r'\{[^{}]+\}', text, re.DOTALL)
             if json_match:
                 result = json.loads(json_match.group())
