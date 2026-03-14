@@ -61,6 +61,8 @@ state = {
 CATEGORY_HASHTAGS = {
     "crypto": "#비트코인 #BTC #크립토 #암호화폐 #Crypto",
     "macro": "#연준 #금리 #인플레이션 #매크로 #Fed #Macro",
+    "crypto_macro": "#비트코인 #BTC #연준 #금리 #매크로 #Crypto #Macro",
+    "macro_crypto": "#연준 #금리 #비트코인 #매크로 #Fed #Crypto",
     "stock": "#주식 #나스닥 #S&P500 #시장 #Stocks",
     "fed": "#연준 #FOMC #금리 #Fed #금융정책",
     "tech": "#기술주 #테크 #AI #Tech",
@@ -214,13 +216,30 @@ def format_news_for_threads(news: dict) -> str:
     return "\n".join(lines)
 
 
+THREADS_MAX_LENGTH = 500  # Threads API 글자수 제한
+
 def build_post_text(news: dict) -> str:
-    """콘텐츠 타입에 따라 포맷 선택"""
+    """콘텐츠 타입에 따라 포맷 선택 + 500자 제한"""
     content_type = news.get("content_type", "news")
     if content_type in ("twitter", "influencer"):
-        return format_twitter_post(news)
+        text = format_twitter_post(news)
     else:
-        return format_news_for_threads(news)
+        text = format_news_for_threads(news)
+
+    # Threads API 500자 제한 초과 시 잘라내기
+    if len(text) > THREADS_MAX_LENGTH:
+        # 해시태그 라인 보존하며 본문만 줄이기
+        lines = text.split("\n")
+        hashtag_line = lines[-1] if lines[-1].startswith("#") else ""
+        truncated = text[:THREADS_MAX_LENGTH - len(hashtag_line) - 5]
+        # 마지막 완전한 줄 단위로 자르기
+        last_newline = truncated.rfind("\n")
+        if last_newline > 0:
+            truncated = truncated[:last_newline]
+        text = truncated + "\n\n" + hashtag_line if hashtag_line else truncated + "..."
+        logger.warning(f"포스트 길이 초과({len(text)}자→{THREADS_MAX_LENGTH}자 제한) 잘라냄")
+
+    return text
 
 
 async def post_news_to_threads(news: dict) -> Optional[str]:
@@ -289,14 +308,18 @@ async def poll_and_post():
             post_id = await post_news_to_threads(news)
 
             if post_id:
-                # posted_to_threads = true 업데이트
-                supabase.table("news").update(
+                # posted_to_threads = true 업데이트 (실패 시 중복 포스팅 방지)
+                update_result = supabase.table("news").update(
                     {"posted_to_threads": True}
                 ).eq("id", news_id).execute()
 
-                state["posts_sent"] += 1
-                state["last_post_id"] = post_id
-                logger.info(f"✅ 포스팅 완료: news_id={news_id}, post_id={post_id}")
+                if not update_result.data:
+                    logger.error(f"⚠️  DB 업데이트 실패: news_id={news_id} — 중복 포스팅 위험")
+                    state["errors"] += 1
+                else:
+                    state["posts_sent"] += 1
+                    state["last_post_id"] = post_id
+                    logger.info(f"✅ 포스팅 완료: news_id={news_id}, post_id={post_id}")
 
                 # 연속 포스팅 간 딜레이 (rate limit 방지)
                 await asyncio.sleep(3)
@@ -341,7 +364,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="SIGNAL Agent C — Threads Auto Poster",
     description="중요도 3+ 뉴스 → Threads 자동 포스팅 (트위터 인용 + 뉴스 요약)",
-    version="2.0.0",
+    version="2.1.0",
     lifespan=lifespan,
 )
 
@@ -358,7 +381,7 @@ async def health():
     return {
         "status": "ok",
         "agent": "C",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "scheduler": scheduler.running if scheduler else False,
         "supabase": supabase is not None,
         "threads_configured": bool(THREADS_ACCESS_TOKEN and THREADS_USER_ID),
