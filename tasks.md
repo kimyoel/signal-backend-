@@ -34,6 +34,7 @@
 - [x] Git 초기화 + 첫 커밋 (2026-03-14)
 - [x] 로컬 테스트 실행 확인 — 40개 전부 통과 (2026-03-14)
 - [x] tasks.md 완료 항목 업데이트 (2026-03-14)
+- [x] GitHub 레포 생성 + 모노레포 구조 커밋 + 푸시 (2026-03-14)
 
 ---
 
@@ -52,7 +53,8 @@
 |------|----------|---------|
 | 2026-03-14 | Phase 1 MVP 전체 완료 | 에이전트 B 초기 구현 완료. 모든 핵심 모듈 + 테스트 19개 통과. db.py에 테스트 모드(TESTING 환경변수) 추가. context.md에 Supabase 키 검증 이슈 기록 필요. |
 | 2026-03-14 | 검토 지적사항 수정 | whale_monitor에 get_unsent_alerts() 추가, push_sender N+1 쿼리 개선, _ChainableMock 도입으로 Supabase 체이닝 mock 문제 해결. 테스트 19→40개. context.md에 동기 방식 유지 결정 + ChainableMock 의사결정 기록. |
+| 2026-03-14 | GitHub 모노레포 구성 | signal-backend 레포 생성. agent-b-whale → agent-b-whale-alert 이름 변경. agent-a/c/e README 추가. GitHub 푸시 완료. |
 
 ---
 
-*마지막 업데이트: 2026-03-14 (검토 지적사항 수정 후)*
+*마지막 업데이트: 2026-03-14 (GitHub 모노레포 구성 후)*

@@ -50,6 +50,12 @@
 - **탈락한 대안**: httpx.AsyncClient + AsyncScheduler (복잡도 증가, 실익 적음)
 - **향후**: Phase 2에서 병렬 푸시 발송이 필요하면 그때 비동기 전환 검토
 
+### GitHub 모노레포 구조 결정 (2026-03-14)
+- **결정**: `signal-backend` 단일 레포에 모든 에이전트를 서브디렉토리로 관리
+- **이유**: 에이전트 간 공통 문서(AGENT.md, plan.md 등)를 루트에서 공유. 한 레포에서 전체 진행 상황 추적 가능. Railway 배포 시 서브디렉토리별 빌드 설정 가능
+- **탈락한 대안**: 에이전트별 별도 레포 (문서 중복, 관리 포인트 증가)
+- **GitHub URL**: https://github.com/kimyoel/signal-backend-
+
 ### 미결 사항
 - [ ] cursor 관리 방식: 로컬 파일 vs Supabase 테이블 (Phase 2에서 결정)
 - [ ] 푸시 알림 실패 시 재시도 횟수 (Phase 2에서 결정)
