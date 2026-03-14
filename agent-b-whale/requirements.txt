@@ -1,0 +1,21 @@
+# ──────────────────────────────────────────────
+# SIGNAL 에이전트 B — Python 패키지 목록
+# ──────────────────────────────────────────────
+# 설치 방법: pip install -r requirements.txt
+# ──────────────────────────────────────────────
+
+# 스케줄러 — 5분마다 자동 실행
+apscheduler==3.10.4
+
+# HTTP 요청 — Whale Alert API, Expo Push API 호출
+httpx==0.27.0
+
+# Supabase — 데이터베이스 연동
+supabase==2.7.0
+
+# 환경변수 — .env 파일에서 비밀키 읽기
+python-dotenv==1.0.1
+
+# 테스트 — 단위 테스트 실행
+pytest==8.3.4
+pytest-mock==3.14.0

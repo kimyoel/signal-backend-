@@ -1,0 +1,43 @@
+# ──────────────────────────────────────────────
+# .gitignore — Git에 올리면 안 되는 파일 목록
+# ──────────────────────────────────────────────
+
+# 환경변수 파일 (비밀키 포함!)
+.env
+
+# Python 캐시
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# 가상환경
+venv/
+.venv/
+env/
+
+# IDE 설정
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS 파일
+.DS_Store
+Thumbs.db
+
+# 테스트/커버리지
+.pytest_cache/
+htmlcov/
+.coverage
+
+# 빌드
+dist/
+build/
+*.egg-info/
+
+# 백업
+*.backup
+*.bak
+*.tar.gz
+*.zip
