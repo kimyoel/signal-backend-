@@ -26,25 +26,35 @@
 ## 디렉토리 구조
 
 ```
-webapp/
-├── AGENT.md              # AI 에이전트 규칙서
-├── plan.md               # 이 파일 (전체 설계)
-├── context.md            # 기술 결정 기록
-├── tasks.md              # 작업 체크리스트
+signal-backend/
+├── AGENT.md                    # AI 에이전트 규칙서
+├── plan.md                     # 이 파일 (전체 설계)
+├── context.md                  # 기술 결정 기록
+├── tasks.md                    # 작업 체크리스트
 ├── .gitignore
 │
-└── agent-b-whale/        # 에이전트 B 소스코드
-    ├── main.py           # 엔트리포인트 (APScheduler 실행)
-    ├── whale_monitor.py  # Whale Alert API 폴링 + DB 저장
-    ├── push_sender.py    # Expo 푸시 알림 발송
-    ├── db.py             # Supabase 연결 모듈
-    ├── config.py         # 설정값 관리 (환경변수, 상수)
-    ├── requirements.txt  # Python 패키지 목록
-    ├── Dockerfile        # Railway 배포용
-    ├── .env.example      # 환경변수 템플릿
-    └── tests/            # 테스트 코드
-        ├── test_whale_monitor.py
-        └── test_push_sender.py
+├── agent-a-news-engine/        # 에이전트 A — 뉴스 수집 + AI 분석 (미구현)
+│   └── README.md
+│
+├── agent-b-whale-alert/        # 에이전트 B — 고래 감지 + 푸시 알림 ✅
+│   ├── main.py
+│   ├── whale_monitor.py
+│   ├── push_sender.py
+│   ├── db.py
+│   ├── config.py
+│   ├── requirements.txt
+│   ├── Dockerfile
+│   ├── .env.example
+│   ├── README.md
+│   └── tests/
+│       ├── test_whale_monitor.py
+│       └── test_push_sender.py
+│
+├── agent-c-threads/            # 에이전트 C — Threads 자동 포스팅 (미구현)
+│   └── README.md
+│
+└── agent-e-ai-analysis/        # 에이전트 E — AI 3각 분석 (미구현)
+    └── README.md
 ```
 
 ---
