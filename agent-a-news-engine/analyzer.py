@@ -48,7 +48,7 @@ logger = logging.getLogger("analyzer")
 # ──────────────────────────────────────────
 
 async def call_gpt(news_title: str, news_summary: str) -> str:
-    """GPT-5.2로 매크로 경제 관점 분석 호출
+    """GPT-5.4로 매크로 경제 관점 분석 호출
 
     - 금리, 달러, 위험자산, 유동성 관점
     - 100~150자 이내
@@ -60,7 +60,7 @@ async def call_gpt(news_title: str, news_summary: str) -> str:
             news_summary=news_summary
         )
         response = await client.chat.completions.create(
-            model="gpt-4o",  # 실제 배포 시 gpt-5.2로 변경
+            model="gpt-5.4",  # 2026-03-14 업데이트: gpt-4o → gpt-5.4 (OpenAI 최신 flagship)
             messages=[{"role": "user", "content": prompt}],
             max_tokens=300,
             temperature=0.3,
@@ -72,7 +72,7 @@ async def call_gpt(news_title: str, news_summary: str) -> str:
 
 
 async def call_gemini(news_title: str, news_summary: str) -> str:
-    """Gemini 3.1 Flash로 데이터/온체인 패턴 분석 호출
+    """Gemini 2.5 Flash로 데이터/온체인 패턴 분석 호출
 
     - 수치, 데이터 패턴, 지표 변화 중심
     - 100~150자 이내
@@ -80,7 +80,7 @@ async def call_gemini(news_title: str, news_summary: str) -> str:
     try:
         api_key = os.getenv("GOOGLE_AI_API_KEY")
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
+        model = genai.GenerativeModel("gemini-2.5-flash")  # 2026-03-14 업데이트: 2.0 deprecated → 2.5
 
         prompt = GEMINI_DATA_PROMPT.format(
             news_title=news_title,
@@ -94,7 +94,7 @@ async def call_gemini(news_title: str, news_summary: str) -> str:
 
 
 async def call_grok(news_title: str, news_summary: str) -> str:
-    """Grok 4.1로 소셜 센티먼트 분석 호출
+    """Grok 4로 소셜 센티먼트 분석 호출
 
     - X(트위터) 커뮤니티 반응 중심
     - 100~150자 이내
@@ -116,7 +116,7 @@ async def call_grok(news_title: str, news_summary: str) -> str:
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": "grok-3",  # 실제 배포 시 grok-4.1로 변경
+                    "model": "grok-4",  # 2026-03-14 업데이트: grok-3 → grok-4 (xAI 최신)
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": 300,
                     "temperature": 0.3,
@@ -155,7 +155,7 @@ async def verify_with_claude(
             grok_analysis=grok_analysis,
         )
         response = await client.messages.create(
-            model="claude-haiku-4-5-20241022",
+            model="claude-3-7-sonnet-20250219",  # 2026-03-14 업데이트: haiku → claude-3-7-sonnet (검증용 경량)
             max_tokens=200,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -249,11 +249,11 @@ async def run_analysis(news_id: str, user_id: str) -> dict:
     analysis_data = {
         "news_id": news_id,
         "gpt_analysis": gpt_result,
-        "gpt_model": "gpt-4o",  # 실제 배포 시 gpt-5.2
+        "gpt_model": "gpt-5.4",
         "gemini_analysis": gemini_result,
-        "gemini_model": "gemini-2.0-flash",
+        "gemini_model": "gemini-2.5-flash",
         "grok_analysis": grok_result,
-        "grok_model": "grok-3",  # 실제 배포 시 grok-4.1
+        "grok_model": "grok-4",
         "verified": verified,
         "verification_note": verification_note,
     }
@@ -276,3 +276,4 @@ async def run_analysis(news_id: str, user_id: str) -> dict:
         "verified": verified,
         "verification_note": verification_note,
     }
+
