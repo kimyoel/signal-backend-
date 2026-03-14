@@ -6,9 +6,9 @@
 # 1. analyst_sources에서 활성 소스 목록 로드
 # 2. 각 소스에서 뉴스 수집 (RSS: feedparser, NewsAPI: httpx)
 # 3. source_url 기준 중복 제거
-# 4. Gemini Flash-Lite로 중요도 1~5 채점
+# 4. Gemini 2.5 Flash-Lite로 중요도 1~5 채점
 # 5. 중요도 3 이상만 남기기
-# 6. Gemini Flash로 한국어 번역 + 요약
+# 6. Gemini 2.5 Flash로 한국어 번역 + 요약
 # 7. news 테이블에 저장
 # 8. 중요도 5는 posted_to_threads=false로 저장 (에이전트 C용)
 # ─────────────────────────────────────────
@@ -290,7 +290,7 @@ async def remove_duplicates(news_items: list[dict]) -> list[dict]:
 # ──────────────────────────────────────────
 
 async def score_importance(news_items: list[dict]) -> list[dict]:
-    """Gemini Flash-Lite로 중요도 1~5 채점 (콘텐츠 타입별 프롬프트 분기)"""
+    """Gemini 2.5 Flash-Lite로 중요도 1~5 채점 (콘텐츠 타입별 프롬프트 분기)"""
     api_key = os.getenv("GOOGLE_AI_API_KEY")
     if not api_key:
         logger.warning("[채점] GOOGLE_AI_API_KEY 없음 → 기본값 3 적용")
@@ -299,7 +299,7 @@ async def score_importance(news_items: list[dict]) -> list[dict]:
         return news_items
 
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.0-flash-lite")
+    model = genai.GenerativeModel("gemini-2.5-flash-lite")
 
     for item in news_items:
         try:
@@ -371,7 +371,7 @@ def filter_by_importance(news_items: list[dict], min_importance: int = 3) -> lis
 # ──────────────────────────────────────────
 
 async def translate_and_summarize(news_items: list[dict]) -> list[dict]:
-    """Gemini Flash로 한국어 번역 + 1~2문장 요약"""
+    """Gemini 2.5 Flash로 한국어 번역 + 1~2문장 요약"""
     api_key = os.getenv("GOOGLE_AI_API_KEY")
     if not api_key:
         logger.warning("[번역] GOOGLE_AI_API_KEY 없음 → 원문 유지")
@@ -381,7 +381,7 @@ async def translate_and_summarize(news_items: list[dict]) -> list[dict]:
         return news_items
 
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.0-flash")
+    model = genai.GenerativeModel("gemini-2.5-flash")
 
     for item in news_items:
         try:
