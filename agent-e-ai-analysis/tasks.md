@@ -26,7 +26,7 @@
 
 - [x] 에러 핸들링 강화 — 타임아웃 15초, 재시도 1회, 실패 격리 (2026-03-14)
 - [x] 테스트 코드 작성 — retry + error_handling 18개 테스트 전부 통과 (2026-03-14)
-- [ ] 로깅 시스템 구축 (structured logging)
+- [x] 로깅 시스템 구축 (structured logging) — JSON 로거 + 전 서비스 적용, 32개 테스트 통과 (2026-03-14)
 - [ ] Supabase 실제 연결 테스트
 - [ ] GPT-4o API 실제 호출 테스트
 - [ ] Gemini 1.5 Flash API 실제 호출 테스트
@@ -51,3 +51,4 @@
 | 2026-03-14 | Phase 1 전체 완료 | 프로젝트 뼈대 생성. 실제 API 키 미설정 상태. |
 | 2026-03-14 | 관리 문서 4종 작성 | AGENT.md, plan.md, context.md, tasks.md |
 | 2026-03-14 | 에러 핸들링 강화 | retry.py, errors.py 신규 생성. ai_clients.py, main.py, analysis.py 수정. 18개 테스트 통과. |
+| 2026-03-14 | 로깅 시스템 구축 | logger.py 신규 생성. auth.py, cache.py, analysis.py, main.py, ai_clients.py에 로그 적용. test_logger.py 14개 테스트 추가. 총 32개 통과. |

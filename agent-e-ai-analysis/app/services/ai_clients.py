@@ -12,10 +12,16 @@
 # - 각 AI 호출에 15초 타임아웃
 # - 실패 시 1회 자동 재시도
 # - 1개 AI가 죽어도 나머지는 정상 반환 (실패 격리)
+#
+# [v1.2] 로깅 시스템 추가
+# - AI 호출 시작/성공/실패 로그
+# - 소요 시간(ms) 기록
+# - Claude 검증 결과 로그
 # ============================================
 
 import asyncio
 import json
+import time
 from datetime import datetime, timezone
 
 import openai
@@ -24,7 +30,11 @@ import google.generativeai as genai
 
 from app.config import settings
 from app.errors import AIServiceError
+from app.logger import get_logger
 from app.services.retry import with_timeout_and_retry
+
+# 로거 생성
+logger = get_logger("ai_clients")
 from app.prompts.templates import (
     GPT_SYSTEM_PROMPT,
     GEMINI_SYSTEM_PROMPT,
@@ -173,6 +183,9 @@ async def _safe_call(
     → 성공이든 실패든 항상 dict를 반환
     → 이래야 1개 AI가 죽어도 나머지에 영향 없음 (실패 격리)
     """
+    start_time = time.monotonic()
+    logger.info("AI 호출 시작", model=model_name, news_id=news.get("id", "unknown"))
+
     try:
         result = await with_timeout_and_retry(
             raw_func,
@@ -181,15 +194,19 @@ async def _safe_call(
             max_retries=AI_CALL_MAX_RETRIES,
             operation_name=f"{model_name} 호출",
         )
+        duration_ms = int((time.monotonic() - start_time) * 1000)
+        logger.info("AI 호출 성공", model=model_name, duration_ms=duration_ms)
         return result
 
     except TimeoutError:
-        # 15초 × 2번 = 30초 기다렸는데 안 옴
+        duration_ms = int((time.monotonic() - start_time) * 1000)
+        logger.warning("AI 호출 타임아웃", model=model_name, duration_ms=duration_ms, timeout=AI_CALL_TIMEOUT)
         return _make_error_result(model_name, angle, icon, "응답 시간 초과")
 
     except Exception as e:
-        # 네트워크 오류, API 키 오류 등
+        duration_ms = int((time.monotonic() - start_time) * 1000)
         error_type = type(e).__name__
+        logger.error("AI 호출 실패", model=model_name, duration_ms=duration_ms, error_type=error_type, error_detail=str(e))
         return _make_error_result(model_name, angle, icon, f"{error_type}")
 
 
@@ -229,6 +246,7 @@ async def verify_with_claude(text: str) -> dict:
     
     중요: Claude 검증 실패해도 분석 자체는 보여줌! (비치명적 에러)
     """
+    start_time = time.monotonic()
     try:
         result = await with_timeout_and_retry(
             _raw_verify_with_claude,
@@ -237,10 +255,14 @@ async def verify_with_claude(text: str) -> dict:
             max_retries=AI_CALL_MAX_RETRIES,
             operation_name="Claude 검증",
         )
+        duration_ms = int((time.monotonic() - start_time) * 1000)
+        flagged = result.get("flagged", False)
+        logger.info("Claude 검증 완료", duration_ms=duration_ms, flagged=flagged)
         return result
 
-    except Exception:
-        # Claude가 실패해도 → 원문 그대로 통과 (검증 안된 것으로 표시)
+    except Exception as e:
+        duration_ms = int((time.monotonic() - start_time) * 1000)
+        logger.warning("Claude 검증 실패 — 원문 통과 처리", duration_ms=duration_ms, error=str(e))
         return {
             "flagged": False,
             "reason": "검증 서비스 일시 오류",
@@ -309,6 +331,8 @@ async def call_all_ai_models(news: dict, requested_models: list[str]) -> dict:
             model_keys.append(key)
 
     # 2. 동시 호출! (_safe_call 덕분에 여기서 Exception이 나올 일 없음)
+    total_start = time.monotonic()
+    logger.info("3각도 분석 시작", models=model_keys, news_id=news.get("id", "unknown"))
     results = await asyncio.gather(*tasks)
 
     # 3. 결과 정리 + Claude 검증
@@ -327,5 +351,16 @@ async def call_all_ai_models(news: dict, requested_models: list[str]) -> dict:
             else:
                 result["verified"] = True
             analyses[key] = result
+
+    total_duration_ms = int((time.monotonic() - total_start) * 1000)
+    success_count = sum(1 for r in analyses.values() if not r.get("error"))
+    error_count = sum(1 for r in analyses.values() if r.get("error"))
+    logger.info(
+        "3각도 분석 완료",
+        total_duration_ms=total_duration_ms,
+        success_count=success_count,
+        error_count=error_count,
+        news_id=news.get("id", "unknown"),
+    )
 
     return analyses

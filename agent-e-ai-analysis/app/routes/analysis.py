@@ -7,19 +7,27 @@
 # [v1.1] 에러 핸들링 강화
 # - HTTPException → 커스텀 에러 클래스 (AuthError, SubscriptionError 등)
 # - 캐시 에러는 무시하고 계속 진행 (비치명적)
+#
+# [v1.2] 로깅 추가
+# - 요청 수신/완료, 각 단계별 소요시간 기록
 # ============================================
 
+import time
 from fastapi import APIRouter, Header
 from pydantic import BaseModel
 from typing import Optional
 
 from app.errors import AuthError, SubscriptionError, NewsNotFoundError, CacheError
+from app.logger import get_logger
 from app.services.auth import verify_user_token, check_subscription_and_credits
 from app.services.cache import get_cached_analysis, save_analysis_to_cache
 from app.services.ai_clients import call_all_ai_models
 from app.services.supabase_client import get_news_by_id
 
 router = APIRouter()
+
+# 로거 생성
+logger = get_logger("analysis")
 
 
 # --- 요청/응답 모델 (데이터 형태 정의) ---
@@ -57,9 +65,12 @@ async def analyze_news(
     - HTTPException 대신 커스텀 에러 사용 → main.py의 전역 핸들러가 처리
     - 캐시 실패해도 서비스는 계속 동작 (비치명적 에러)
     """
+    request_start = time.monotonic()
+    logger.info("분석 요청 수신", news_id=request.news_id, models=request.models)
 
     # [1단계] 사용자 인증
     if not authorization:
+        logger.warning("인증 토큰 누락", news_id=request.news_id)
         raise AuthError("인증 토큰이 필요합니다")
 
     token = authorization.replace("Bearer ", "")
@@ -72,10 +83,12 @@ async def analyze_news(
     try:
         cached = await get_cached_analysis(request.news_id)
         if cached:
+            total_ms = int((time.monotonic() - request_start) * 1000)
+            logger.info("캐시 응답 반환", news_id=request.news_id, total_ms=total_ms)
             return {**cached, "cached": True}
-    except Exception:
+    except Exception as e:
         # 캐시 읽기 실패 → 무시하고 새로 분석 진행
-        pass
+        logger.warning("캐시 조회 실패 — 새로 분석 진행", news_id=request.news_id, error=str(e))
 
     # [3단계] 구독 상태 & 크레딧 확인
     credit_check = await check_subscription_and_credits(user["id"])
@@ -100,9 +113,19 @@ async def analyze_news(
     # 캐시 저장 실패해도 결과는 반환 (비치명적 에러)
     try:
         await save_analysis_to_cache(request.news_id, analysis_result)
-    except Exception:
+    except Exception as e:
         # 캐시 저장 실패 → 무시 (다음에 또 AI 호출하면 됨, 비용만 약간 더 듦)
-        pass
+        logger.warning("캐시 저장 실패", news_id=request.news_id, error=str(e))
+
+    total_ms = int((time.monotonic() - request_start) * 1000)
+    success_count = sum(1 for r in analysis_result.values() if not r.get("error"))
+    logger.info(
+        "분석 요청 완료",
+        news_id=request.news_id,
+        total_ms=total_ms,
+        success_count=success_count,
+        cached=False,
+    )
 
     # 면책 고지 포함해서 반환
     return {

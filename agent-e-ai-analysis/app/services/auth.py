@@ -3,9 +3,16 @@
 # ============================================
 # 사용자가 로그인했는지, 유료인지 확인하는 로직
 # 비전공자 설명: "입장권 검사하는 직원"
+#
+# [v1.2] 로깅 추가
+# - 인증 성공/실패, 크레딧 차감/소진 로그
 # ============================================
 
+from app.logger import get_logger
 from app.services.supabase_client import get_supabase
+
+# 로거 생성
+logger = get_logger("auth")
 
 
 async def verify_user_token(token: str) -> dict | None:
@@ -22,12 +29,15 @@ async def verify_user_token(token: str) -> dict | None:
         supabase = get_supabase()
         user_response = supabase.auth.get_user(token)
         if user_response and user_response.user:
+            logger.info("인증 성공", user_id=user_response.user.id)
             return {
                 "id": user_response.user.id,
                 "email": user_response.user.email,
             }
+        logger.warning("인증 실패 — 유효하지 않은 토큰")
         return None
-    except Exception:
+    except Exception as e:
+        logger.error("인증 실패 — 예외 발생", error_type=type(e).__name__, error_detail=str(e))
         return None
 
 
@@ -50,6 +60,7 @@ async def check_subscription_and_credits(user_id: str) -> dict:
     result = supabase.table("users").select("ai_credits").eq("id", user_id).execute()
 
     if not result.data or len(result.data) == 0:
+        logger.warning("크레딧 확인 실패 — 사용자 없음", user_id=user_id)
         return {"allowed": False, "reason": "사용자 정보를 찾을 수 없습니다"}
 
     user = result.data[0]
@@ -57,6 +68,7 @@ async def check_subscription_and_credits(user_id: str) -> dict:
 
     # ai_credits = -1 → 무제한 (유료 구독자)
     if ai_credits == -1:
+        logger.info("크레딧 확인 — 무제한 구독자", user_id=user_id)
         return {"allowed": True}
 
     # ai_credits > 0 → 차감 후 허용
@@ -65,9 +77,11 @@ async def check_subscription_and_credits(user_id: str) -> dict:
         supabase.table("users").update(
             {"ai_credits": ai_credits - 1}
         ).eq("id", user_id).execute()
+        logger.info("크레딧 차감", user_id=user_id, remaining=ai_credits - 1)
         return {"allowed": True, "remaining_credits": ai_credits - 1}
 
     # ai_credits = 0 → 무료 크레딧 소진
+    logger.warning("크레딧 소진 — 분석 거부", user_id=user_id, ai_credits=0)
     return {
         "allowed": False,
         "reason": "이번 달 무료 AI 분석 횟수를 모두 사용했습니다. 구독하시면 무제한으로 이용 가능합니다!",

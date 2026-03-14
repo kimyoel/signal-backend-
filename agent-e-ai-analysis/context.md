@@ -70,3 +70,20 @@
 - [ ] AI API 키 — 아직 미설정
 - [ ] Railway 배포 — 아직 미진행
 - [ ] 에이전트 D(앱)와의 통합 테스트 방식 — 미정
+
+### 로깅 시스템 설계 (2026-03-14)
+- **결정**: JSON 구조화 로거 (app/logger.py) + 전 서비스 적용
+- **이유**:
+  - Railway 로그 뷰어에서 JSON 형식이면 검색/필터가 훨씬 쉬움
+  - 각 로그에 model, duration_ms, news_id 등 컨텍스트 데이터를 넣어서 문제 추적 용이
+  - Python 표준 logging 모듈 위에 StructuredLogger 래퍼를 씌워서 기존 코드와 호환
+- **적용 범위**: ai_clients.py, auth.py, cache.py, analysis.py, main.py (5개 모듈)
+- **로그 이벤트 종류**:
+  - AI 호출: 시작/성공(duration_ms)/실패(error_type)/타임아웃
+  - 인증: 성공/실패/예외
+  - 크레딧: 무제한/차감(remaining)/소진
+  - 캐시: 히트/미스/저장완료/저장실패
+  - 요청: 수신/캐시응답/완료(total_ms)
+  - 에러: 비즈니스에러(status_code)/예상외에러(error_detail)
+- **탈락한 대안**: structlog (이유: 추가 의존성, 표준 logging으로도 충분)
+- **테스트 방식**: StringIO 핸들러로 직접 캡처 (pytest capsys는 logging과 충돌)

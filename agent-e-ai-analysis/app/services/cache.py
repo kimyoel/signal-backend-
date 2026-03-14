@@ -7,13 +7,20 @@
 # 비전공자 설명:
 # "한 번 계산한 답은 저장해두고, 또 물어보면 저장된 거 바로 보여주기"
 # "이렇게 하면 AI 비용을 70%까지 아낄 수 있음!"
+#
+# [v1.2] 로깅 추가
+# - 캐시 히트/미스, 저장 성공/실패 로그
 # ============================================
 
 import json
 from datetime import datetime, timezone, timedelta
 
 from app.config import settings
+from app.logger import get_logger
 from app.services.supabase_client import get_supabase
+
+# 로거 생성
+logger = get_logger("cache")
 
 
 async def get_cached_analysis(news_id: str) -> dict | None:
@@ -39,6 +46,7 @@ async def get_cached_analysis(news_id: str) -> dict | None:
 
     if result.data and len(result.data) > 0:
         row = result.data[0]
+        logger.info("캐시 히트 — 저장된 분석 반환", news_id=news_id)
         # DB에 저장된 형태를 API 응답 형태로 변환
         return {
             "news_id": news_id,
@@ -68,6 +76,7 @@ async def get_cached_analysis(news_id: str) -> dict | None:
             "verified": row.get("verified", False),
         }
 
+    logger.info("캐시 미스 — 새로 분석 필요", news_id=news_id)
     return None
 
 
@@ -106,3 +115,5 @@ async def save_analysis_to_cache(news_id: str, analyses: dict) -> None:
     supabase.table("news").update(
         {"has_analysis": True}
     ).eq("id", news_id).execute()
+
+    logger.info("캐시 저장 완료", news_id=news_id)
