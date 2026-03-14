@@ -32,6 +32,11 @@
 - **이유**: 마스터 설계서에서 배포 플랫폼으로 Railway 지정. APScheduler가 상시 돌아야 하므로 서버리스(Cloudflare 등)는 부적합
 - **탈락한 대안**: Cloudflare Workers (Python 미지원, 상시 실행 불가), Heroku (비용)
 
+### DB 테스트 모드 도입 (2026-03-14)
+- **결정**: db.py에 TESTING 환경변수로 테스트 모드 분기 추가
+- **이유**: supabase-py 2.7은 create_client() 시점에 API 키 형식을 검증함. 테스트에서 가짜 키로는 클라이언트 생성 자체가 실패. TESTING=true일 때 supabase 객체를 None으로 두고 테스트에서 mock 처리하는 방식 채택
+- **탈락한 대안**: monkeypatch로 create_client mock (import 순서 이슈로 복잡), 실제 Supabase 프로젝트로 테스트 (비용, 외부 의존)
+
 ---
 
 ### 미결 사항
