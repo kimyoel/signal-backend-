@@ -28,7 +28,10 @@ from db import (
     save_news_batch,
 )
 from sources import load_rss_sources, NEWSAPI_KEYWORDS
-from prompts import SCORING_PROMPT, TRANSLATE_SUMMARIZE_PROMPT
+from prompts import (
+    NEWS_SCORING_PROMPT, ANALYST_SCORING_PROMPT, TWITTER_SCORING_PROMPT,
+    TRANSLATE_SUMMARIZE_PROMPT, CONTENT_THRESHOLDS
+)
 
 import os
 from dotenv import load_dotenv
@@ -287,7 +290,7 @@ async def remove_duplicates(news_items: list[dict]) -> list[dict]:
 # ──────────────────────────────────────────
 
 async def score_importance(news_items: list[dict]) -> list[dict]:
-    """Gemini Flash-Lite로 중요도 1~5 채점"""
+    """Gemini Flash-Lite로 중요도 1~5 채점 (콘텐츠 타입별 프롬프트 분기)"""
     api_key = os.getenv("GOOGLE_AI_API_KEY")
     if not api_key:
         logger.warning("[채점] GOOGLE_AI_API_KEY 없음 → 기본값 3 적용")
@@ -300,22 +303,54 @@ async def score_importance(news_items: list[dict]) -> list[dict]:
 
     for item in news_items:
         try:
-            prompt = SCORING_PROMPT.format(
-                title=item["title_original"],
-                content_preview=item.get("content_preview", ""),
-            )
+            content_type = item.get("content_type", "news")
+
+            # 콘텐츠 타입에 따라 프롬프트 선택
+            if content_type == "twitter":
+                prompt = TWITTER_SCORING_PROMPT.format(
+                    username=item.get("source", "unknown"),
+                    tweet_text=item.get("title_original", ""),
+                )
+            elif content_type in ("analyst", "influencer"):
+                prompt = ANALYST_SCORING_PROMPT.format(
+                    source=item.get("source", "unknown"),
+                    title=item.get("title_original", ""),
+                    content_preview=item.get("content_preview", ""),
+                )
+            else:
+                prompt = NEWS_SCORING_PROMPT.format(
+                    title=item.get("title_original", ""),
+                    content_preview=item.get("content_preview", ""),
+                )
+
             response = model.generate_content(prompt)
             text = response.text.strip()
 
-            # 숫자 추출 (1~5)
-            import re
-            numbers = re.findall(r'\b[1-5]\b', text)
-            score = int(numbers[0]) if numbers else 3
+            # JSON 파싱 (score + reason)
+            score = 3  # 기본값
+            reason = ""
+            try:
+                json_match = re.search(r'\{[^{}]+\}', text, re.DOTALL)
+                if json_match:
+                    result = json.loads(json_match.group())
+                    score = int(result.get("score", 3))
+                    reason = result.get("reason", "")
+                else:
+                    # fallback: 숫자 추출
+                    numbers = re.findall(r'\b[1-5]\b', text)
+                    score = int(numbers[0]) if numbers else 3
+            except (json.JSONDecodeError, ValueError):
+                numbers = re.findall(r'\b[1-5]\b', text)
+                score = int(numbers[0]) if numbers else 3
+
             item["importance"] = max(1, min(5, score))
+            item["score_reason"] = reason
+            logger.debug(f"[채점] {content_type} | 점수:{score} | {reason[:50] if reason else 'N/A'}")
 
         except Exception as e:
             logger.error(f"[채점] 오류: {e}")
             item["importance"] = 3
+            item["score_reason"] = ""
 
     return news_items
 
