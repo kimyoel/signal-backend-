@@ -317,7 +317,7 @@ async def score_importance(news_items: list[dict]) -> list[dict]:
         return news_items
 
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.0-flash-lite")  # stable model
+    model = genai.GenerativeModel("gemini-2.5-flash-lite")
 
     for item in news_items:
         try:
@@ -399,7 +399,7 @@ async def translate_and_summarize(news_items: list[dict]) -> list[dict]:
         return news_items
 
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.0-flash")  # stable model
+    model = genai.GenerativeModel("gemini-2.5-flash")
 
     for item in news_items:
         try:
