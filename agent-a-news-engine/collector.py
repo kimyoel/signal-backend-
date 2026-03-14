@@ -10,7 +10,7 @@
 # 5. 중요도 3 이상만 남기기
 # 6. Gemini 2.5 Flash로 한국어 번역 + 요약
 # 7. news 테이블에 저장
-# 8. 중요도 5는 posted_to_threads=false로 저장 (에이전트 C용)
+# 8. 중요도 3+는 posted_to_threads=false로 저장 (에이전트 C용)
 # ─────────────────────────────────────────
 
 import asyncio
@@ -317,7 +317,7 @@ async def score_importance(news_items: list[dict]) -> list[dict]:
         return news_items
 
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.5-flash-lite")
+    model = genai.GenerativeModel("gemini-2.0-flash-lite")  # stable model
 
     for item in news_items:
         try:
@@ -399,7 +399,7 @@ async def translate_and_summarize(news_items: list[dict]) -> list[dict]:
         return news_items
 
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    model = genai.GenerativeModel("gemini-2.0-flash")  # stable model
 
     for item in news_items:
         try:
@@ -433,7 +433,7 @@ async def translate_and_summarize(news_items: list[dict]) -> list[dict]:
 # ──────────────────────────────────────────
 
 async def save_to_db(news_items: list[dict]) -> list[dict]:
-    """news 테이블에 저장, 중요도 4+ 트위터 / 5 뉴스는 posted_to_threads=false"""
+    """news 테이블에 저장, 중요도 3+ 항목은 posted_to_threads=false (Agent C 포스팅 대기)"""
     supabase = get_supabase_client()
     records = []
 
@@ -441,11 +441,8 @@ async def save_to_db(news_items: list[dict]) -> list[dict]:
         content_type = item.get("content_type", "news")
         importance = item.get("importance", 3)
 
-        # Threads 포스팅 대상 결정 (Agent C와 동일하게 importance>=3 통일)
-        if content_type in ("twitter", "analyst", "influencer"):
-            post_to_threads = importance >= 3
-        else:
-            post_to_threads = importance >= 3
+        # Threads 포스팅 대상 결정: 모든 타입 importance >= 3 통일
+        post_to_threads = importance >= 3
 
         records.append({
             "title": item.get("title", item.get("title_original", "")),
