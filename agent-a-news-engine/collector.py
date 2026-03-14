@@ -98,6 +98,23 @@ async def fetch_rss_feed(source: dict) -> list[dict]:
             if not title or not link:
                 continue
 
+            # 사전 필터링: crypto/macro 관련 키워드 없으면 스킵 (Bloomberg 등 일반 피드 노이즈 제거)
+            RSS_KEYWORDS = [
+                "bitcoin", "btc", "ethereum", "eth", "crypto", "blockchain", "defi", "nft",
+                "stablecoin", "usdc", "usdt", "coinbase", "binance", "solana", "ripple",
+                "federal reserve", "fed ", "interest rate", "inflation", "deflation",
+                "nasdaq", "s&p", "dow jones", "recession", "gdp", "unemployment",
+                "treasury", "yield", "bond", "monetary", "fiscal", "tariff",
+                "macro", "market", "stock", "equity", "liquidity", "cpi", "fomc",
+                "sec", "cftc", "regulation", "etf", "hedge fund",
+                "비트코인", "이더리움", "암호화폐", "연준", "금리", "인플레이션",
+            ]
+            title_lower = title.lower()
+            content_lower = (summary or "").lower()
+            is_relevant = any(kw in title_lower or kw in content_lower for kw in RSS_KEYWORDS)
+            if not is_relevant:
+                continue  # 관련 없는 뉴스 사전 제거
+
             items.append({
                 "title_original": title,
                 "content_preview": summary[:500] if summary else title,
@@ -198,7 +215,7 @@ async def fetch_all_twitter(api_key: str) -> list[dict]:
     logger.info(f"[Twitter] 인플루언서 {len(TWITTER_INFLUENCERS)}명 수집 시작")
 
     for influencer in TWITTER_INFLUENCERS:
-        tweets = await fetch_twitter_influencer(influencer, api_key, count=5)
+        tweets = await fetch_twitter_influencer(influencer, api_key, count=20)
         all_tweets.extend(tweets)
         await asyncio.sleep(6)  # twitterapi.io 무료 티어: 5초에 1요청
 
