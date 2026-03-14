@@ -235,14 +235,48 @@ def save_to_database(transactions: list[dict]) -> list[dict]:
     return saved
 
 
+def get_unsent_alerts() -> list[dict]:
+    """
+    이전 주기에서 푸시 발송에 실패한 건(push_sent=false)을 DB에서 조회하는 함수.
+
+    왜 필요한가?
+    → 이전 주기에서 Expo API가 장애였거나, 서버가 중간에 재시작됐으면
+      push_sent=false인 채로 남아있는 거래가 있을 수 있음.
+      이걸 다시 찾아서 알림을 보내야 누락이 안 생김.
+    """
+    try:
+        result = (
+            supabase.table("whale_alerts")
+            .select("id, blockchain, symbol, amount, amount_usd, "
+                    "from_address, to_address, from_label, to_label, "
+                    "tx_hash, whale_alert_id, occurred_at")
+            .eq("push_sent", False)
+            .order("occurred_at", desc=True)
+            .limit(50)  # 한 번에 너무 많이 가져오지 않게 제한
+            .execute()
+        )
+
+        unsent = result.data or []
+        if unsent:
+            print(f"[고래감시] 📋 이전 미발송 건 {len(unsent)}건 발견")
+        return unsent
+
+    except Exception as e:
+        print(f"[고래감시] ⚠️ 미발송 건 조회 실패: {e}")
+        return []
+
+
 def run_whale_check() -> list[dict]:
     """
     고래 감시의 메인 실행 함수.
     main.py의 APScheduler가 5분마다 이 함수를 호출한다.
 
-    전체 흐름: API 호출 → 중복 제거 → DB 저장 → 새 거래 반환
+    전체 흐름:
+    1. API 호출 → 중복 제거 → DB 저장 (새 거래)
+    2. push_sent=false 인 미발송 건 조회 (이전 실패분 포함)
+    3. 새 거래 + 미발송 건 합쳐서 반환
 
-    반환값: 새로 저장된 거래 리스트 (push_sender에게 전달용)
+    반환값: 푸시 발송이 필요한 거래 리스트 (push_sender에게 전달용)
     """
     print()
     print("=" * 50)
@@ -251,18 +285,24 @@ def run_whale_check() -> list[dict]:
 
     # 1단계: API에서 거래 가져오기
     transactions = fetch_whale_transactions()
-    if not transactions:
-        print("[고래감시] 새 거래 없음 — 다음 주기에 다시 확인")
+
+    # 2단계: 중복 제거 + DB 저장 (새 거래가 있을 때만)
+    if transactions:
+        new_transactions = filter_new_transactions(transactions)
+        if new_transactions:
+            save_to_database(new_transactions)
+        else:
+            print("[고래감시] 모두 이미 저장된 거래")
+    else:
+        print("[고래감시] API에서 새 거래 없음")
+
+    # 3단계: push_sent=false 인 모든 미발송 건 조회
+    # → 이번에 새로 저장한 것 + 이전 주기에서 실패한 것 모두 포함
+    unsent_alerts = get_unsent_alerts()
+
+    if not unsent_alerts:
+        print("[고래감시] 발송 대기 건 없음 — 다음 주기에 다시 확인")
         return []
 
-    # 2단계: 중복 제거
-    new_transactions = filter_new_transactions(transactions)
-    if not new_transactions:
-        print("[고래감시] 모두 이미 저장된 거래 — 건너뜀")
-        return []
-
-    # 3단계: DB에 저장
-    saved = save_to_database(new_transactions)
-
-    print(f"[고래감시] 🐋 감시 완료: 신규 {len(saved)}건 처리됨")
-    return saved
+    print(f"[고래감시] 🐋 감시 완료: 발송 대기 {len(unsent_alerts)}건")
+    return unsent_alerts

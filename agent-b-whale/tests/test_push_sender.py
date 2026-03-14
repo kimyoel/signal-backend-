@@ -196,3 +196,260 @@ class TestUserFiltering:
         amount_usd = 2_000_000
         should_notify = amount_usd >= PAID_USER_MIN_USD
         assert should_notify is True
+
+
+# ──────────────────────────────────────────────
+# Mock 기반 통합 테스트 — 실제 함수 호출
+# ──────────────────────────────────────────────
+
+from unittest.mock import patch, MagicMock
+
+
+class _ChainableMock:
+    """
+    Supabase 쿼리 체이닝을 완벽히 흉내내는 헬퍼 클래스.
+
+    왜 필요한가?
+    → Supabase SDK는 .select().not_.is_().eq().lte().execute() 같이
+      속성 접근(.not_)과 메서드 호출(.is_())이 섞인 체이닝을 쓴다.
+      일반 MagicMock은 이 패턴을 제대로 못 따라가서
+      .execute()에서 의도한 값이 안 나옴.
+
+    해결법:
+    → 어떤 속성 접근이든, 어떤 메서드 호출이든 항상 자기 자신(self)을 반환.
+      오직 .execute()만 미리 지정한 결과를 반환.
+
+    핵심 포인트:
+    → .not_ 같은 속성 접근은 self를 반환 (객체)
+    → .select(), .eq(), .is_() 같은 메서드 호출은 __call__로 self 반환
+    → .execute()만 미리 지정한 결과 반환
+    """
+    def __init__(self, execute_result):
+        self._execute_result = execute_result
+
+    def __getattr__(self, name):
+        # .execute()는 미리 지정한 결과를 반환하는 함수
+        if name == "execute":
+            return lambda: self._execute_result
+        # .not_, .select, .eq, .is_, .in_, .order, .lte 등
+        # 모든 속성 접근 → 자기 자신을 반환 (체이닝 유지)
+        return self
+
+    def __call__(self, *args, **kwargs):
+        # .select("id"), .eq("push_enabled", True), .is_("col", "null") 등
+        # 메서드로 호출될 때도 자기 자신을 반환 (체이닝 유지)
+        return self
+
+
+class TestGetPushRecipients:
+    """get_push_recipients() — N+1 개선된 사용자 조회 테스트"""
+
+    @patch("push_sender.supabase")
+    def test_free_user_filtered_under_5m(self, mock_supabase):
+        """FREE 사용자가 $500만 미만 거래에서 제외되는지"""
+        from push_sender import get_push_recipients
+
+        # users 테이블 결과
+        mock_users = MagicMock()
+        mock_users.data = [
+            {"id": "user-1", "expo_push_token": "ExponentPushToken[aaa]", "notify_whale_min_usd": 1000000},
+        ]
+
+        # subscriptions 테이블 결과 — 구독 없음 = FREE
+        mock_subs = MagicMock()
+        mock_subs.data = []
+
+        call_count = {"n": 0}
+
+        def table_side_effect(name):
+            call_count["n"] += 1
+            if call_count["n"] == 1:  # users
+                return _ChainableMock(mock_users)
+            else:  # subscriptions
+                return _ChainableMock(mock_subs)
+
+        mock_supabase.table.side_effect = table_side_effect
+
+        # $300만 거래 → FREE 사용자는 $500만 기준 미달 → 제외
+        result = get_push_recipients(3_000_000)
+        assert len(result) == 0
+
+    @patch("push_sender.supabase")
+    def test_paid_user_included_over_1m(self, mock_supabase):
+        """BASIC 사용자가 $100만 이상 거래에서 포함되는지"""
+        from push_sender import get_push_recipients
+
+        mock_users = MagicMock()
+        mock_users.data = [
+            {"id": "user-1", "expo_push_token": "ExponentPushToken[aaa]", "notify_whale_min_usd": 1000000},
+        ]
+
+        mock_subs = MagicMock()
+        mock_subs.data = [
+            {"user_id": "user-1", "plan": "basic"},
+        ]
+
+        call_count = {"n": 0}
+
+        def table_side_effect(name):
+            call_count["n"] += 1
+            if call_count["n"] == 1:  # users
+                return _ChainableMock(mock_users)
+            else:  # subscriptions
+                return _ChainableMock(mock_subs)
+
+        mock_supabase.table.side_effect = table_side_effect
+
+        # $200만 거래 → BASIC 사용자는 $100만 기준 충족 → 포함
+        result = get_push_recipients(2_000_000)
+        assert len(result) == 1
+        assert result[0]["plan"] == "basic"
+        assert result[0]["expo_push_token"] == "ExponentPushToken[aaa]"
+
+    @patch("push_sender.supabase")
+    def test_free_user_included_over_5m(self, mock_supabase):
+        """FREE 사용자도 $500만 이상이면 알림 받는지"""
+        from push_sender import get_push_recipients
+
+        mock_users = MagicMock()
+        mock_users.data = [
+            {"id": "user-1", "expo_push_token": "ExponentPushToken[bbb]", "notify_whale_min_usd": 1000000},
+        ]
+
+        mock_subs = MagicMock()
+        mock_subs.data = []  # 구독 없음 = FREE
+
+        call_count = {"n": 0}
+
+        def table_side_effect(name):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return _ChainableMock(mock_users)
+            else:
+                return _ChainableMock(mock_subs)
+
+        mock_supabase.table.side_effect = table_side_effect
+
+        # $600만 거래 → FREE 사용자도 $500만 기준 충족 → 포함
+        result = get_push_recipients(6_000_000)
+        assert len(result) == 1
+        assert result[0]["plan"] == "free"
+
+    @patch("push_sender.supabase")
+    def test_mixed_users_filtering(self, mock_supabase):
+        """FREE + BASIC 혼합 시, 금액 기준에 맞게 필터링되는지"""
+        from push_sender import get_push_recipients
+
+        mock_users = MagicMock()
+        mock_users.data = [
+            {"id": "free-user", "expo_push_token": "ExponentPushToken[free]", "notify_whale_min_usd": 1000000},
+            {"id": "basic-user", "expo_push_token": "ExponentPushToken[basic]", "notify_whale_min_usd": 1000000},
+        ]
+
+        mock_subs = MagicMock()
+        mock_subs.data = [
+            {"user_id": "basic-user", "plan": "basic"},
+            # free-user는 구독 없음 → FREE 처리
+        ]
+
+        call_count = {"n": 0}
+
+        def table_side_effect(name):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                return _ChainableMock(mock_users)
+            else:
+                return _ChainableMock(mock_subs)
+
+        mock_supabase.table.side_effect = table_side_effect
+
+        # $200만 거래 → BASIC은 포함, FREE는 $500만 미달로 제외
+        result = get_push_recipients(2_000_000)
+        assert len(result) == 1
+        assert result[0]["plan"] == "basic"
+
+    @patch("push_sender.supabase")
+    def test_no_users_returns_empty(self, mock_supabase):
+        """푸시 가능한 사용자가 없을 때 빈 리스트"""
+        from push_sender import get_push_recipients
+
+        mock_users = MagicMock()
+        mock_users.data = []
+
+        mock_supabase.table.return_value = _ChainableMock(mock_users)
+
+        result = get_push_recipients(10_000_000)
+        assert result == []
+
+    @patch("push_sender.supabase")
+    def test_db_error_returns_empty(self, mock_supabase):
+        """DB 에러 시 빈 리스트 반환 (죽지 않음)"""
+        from push_sender import get_push_recipients
+
+        mock_supabase.table.side_effect = Exception("DB connection failed")
+
+        result = get_push_recipients(10_000_000)
+        assert result == []
+
+
+class TestSendPushBatch:
+    """send_push_batch() — Expo API 호출 테스트"""
+
+    @patch("push_sender.httpx.post")
+    def test_successful_send(self, mock_post):
+        """정상 발송 시 True 반환"""
+        from push_sender import send_push_batch
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"data": [{"status": "ok"}]}
+        mock_response.raise_for_status = MagicMock()
+        mock_post.return_value = mock_response
+
+        messages = [{"to": "ExponentPushToken[aaa]", "title": "test", "body": "test"}]
+        result = send_push_batch(messages)
+
+        assert result is True
+        mock_post.assert_called_once()
+
+    @patch("push_sender.httpx.post")
+    def test_api_failure_returns_false(self, mock_post):
+        """Expo API 실패 시 False 반환"""
+        from push_sender import send_push_batch
+
+        mock_post.side_effect = Exception("Connection refused")
+
+        messages = [{"to": "ExponentPushToken[aaa]", "title": "test", "body": "test"}]
+        result = send_push_batch(messages)
+
+        assert result is False
+
+    def test_empty_messages_returns_true(self):
+        """빈 메시지 리스트는 True 반환 (발송할 게 없으니까)"""
+        from push_sender import send_push_batch
+
+        result = send_push_batch([])
+        assert result is True
+
+
+class TestMarkPushSent:
+    """mark_push_sent() — push_sent 상태 업데이트 테스트"""
+
+    @patch("push_sender.supabase")
+    def test_updates_push_sent(self, mock_supabase):
+        """push_sent가 True로 업데이트 되는지"""
+        from push_sender import mark_push_sent
+
+        mark_push_sent(["uuid-1", "uuid-2"])
+
+        # update가 2번 호출됐는지 확인
+        assert mock_supabase.table.return_value.update.call_count == 2
+
+    @patch("push_sender.supabase")
+    def test_error_doesnt_crash(self, mock_supabase):
+        """DB 업데이트 실패해도 에러로 죽지 않는지"""
+        from push_sender import mark_push_sent
+
+        mock_supabase.table.side_effect = Exception("DB error")
+
+        # 에러 발생해도 예외가 밖으로 나오면 안 됨
+        mark_push_sent(["uuid-1"])  # 에러 없이 통과해야 함

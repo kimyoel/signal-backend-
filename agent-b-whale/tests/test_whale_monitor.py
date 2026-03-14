@@ -156,3 +156,181 @@ class TestDuplicateDetection:
 
         assert len(new_only) == 1
         assert new_only[0]["tx_hash"] == "hash2"
+
+
+# ──────────────────────────────────────────────
+# Mock 기반 통합 테스트 — 실제 함수 호출
+# ──────────────────────────────────────────────
+
+class TestFetchWhaleTransactions:
+    """fetch_whale_transactions() 함수를 mock API로 테스트"""
+
+    @patch("whale_monitor.httpx.get")
+    def test_successful_api_call(self, mock_get):
+        """API 정상 응답 시 거래 목록이 올바르게 파싱되는지"""
+        from whale_monitor import fetch_whale_transactions
+
+        # httpx.get이 가짜 응답을 반환하도록 설정
+        mock_response = MagicMock()
+        mock_response.json.return_value = FAKE_API_RESPONSE
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+
+        result = fetch_whale_transactions()
+
+        # BTC, ETH 2건 모두 감시 대상이므로 2건 반환
+        assert len(result) == 2
+        assert result[0]["symbol"] == "BTC"
+        assert result[0]["amount"] == 1240.5
+        assert result[0]["from_label"] == "Binance"
+        assert result[1]["symbol"] == "ETH"
+        assert result[1]["tx_hash"] == "def456hash"
+
+    @patch("whale_monitor.httpx.get")
+    def test_api_timeout(self, mock_get):
+        """API 타임아웃 시 빈 리스트 반환"""
+        from whale_monitor import fetch_whale_transactions
+        import httpx
+
+        mock_get.side_effect = httpx.TimeoutException("timeout")
+
+        result = fetch_whale_transactions()
+        assert result == []
+
+    @patch("whale_monitor.httpx.get")
+    def test_api_error_response(self, mock_get):
+        """API가 error 응답을 보낼 때 빈 리스트 반환"""
+        from whale_monitor import fetch_whale_transactions
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "result": "error",
+            "message": "Invalid API key",
+        }
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+
+        result = fetch_whale_transactions()
+        assert result == []
+
+    @patch("whale_monitor.httpx.get")
+    def test_filters_non_tracked_symbols(self, mock_get):
+        """감시 대상이 아닌 코인(DOGE)은 필터링되는지"""
+        from whale_monitor import fetch_whale_transactions
+
+        response_with_doge = {
+            "result": "success",
+            "count": 1,
+            "transactions": [
+                {
+                    "blockchain": "dogecoin",
+                    "symbol": "doge",
+                    "id": "333333",
+                    "hash": "doge_hash",
+                    "from": {"address": "addr1", "owner": "unknown", "owner_type": "unknown"},
+                    "to": {"address": "addr2", "owner": "unknown", "owner_type": "unknown"},
+                    "timestamp": 1710000200,
+                    "amount": 999999999,
+                    "amount_usd": 50000000,
+                }
+            ],
+        }
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = response_with_doge
+        mock_response.raise_for_status = MagicMock()
+        mock_get.return_value = mock_response
+
+        result = fetch_whale_transactions()
+        assert result == []  # DOGE는 감시 대상 아님
+
+
+class TestFilterNewTransactions:
+    """filter_new_transactions()를 Supabase mock으로 테스트"""
+
+    @patch("whale_monitor.supabase")
+    def test_filters_existing_hashes(self, mock_supabase):
+        """DB에 이미 있는 tx_hash는 제외되는지"""
+        from whale_monitor import filter_new_transactions
+
+        # DB에 hash1이 이미 있다고 가정
+        mock_result = MagicMock()
+        mock_result.data = [{"tx_hash": "hash1"}]
+        mock_supabase.table.return_value.select.return_value.in_.return_value.execute.return_value = mock_result
+
+        transactions = [
+            {"tx_hash": "hash1", "symbol": "BTC"},
+            {"tx_hash": "hash2", "symbol": "ETH"},
+        ]
+
+        result = filter_new_transactions(transactions)
+
+        assert len(result) == 1
+        assert result[0]["tx_hash"] == "hash2"
+
+    @patch("whale_monitor.supabase")
+    def test_all_new_transactions(self, mock_supabase):
+        """모두 새 거래일 때 전부 반환"""
+        from whale_monitor import filter_new_transactions
+
+        mock_result = MagicMock()
+        mock_result.data = []  # DB에 아무것도 없음
+        mock_supabase.table.return_value.select.return_value.in_.return_value.execute.return_value = mock_result
+
+        transactions = [
+            {"tx_hash": "new1", "symbol": "BTC"},
+            {"tx_hash": "new2", "symbol": "ETH"},
+        ]
+
+        result = filter_new_transactions(transactions)
+        assert len(result) == 2
+
+    def test_empty_input(self):
+        """빈 리스트 입력 시 빈 리스트 반환"""
+        from whale_monitor import filter_new_transactions
+
+        result = filter_new_transactions([])
+        assert result == []
+
+
+class TestGetUnsentAlerts:
+    """get_unsent_alerts() — 미발송 건 재조회 테스트"""
+
+    @patch("whale_monitor.supabase")
+    def test_returns_unsent_alerts(self, mock_supabase):
+        """push_sent=false인 건들이 반환되는지"""
+        from whale_monitor import get_unsent_alerts
+
+        mock_result = MagicMock()
+        mock_result.data = [
+            {"id": "uuid-1", "symbol": "BTC", "amount_usd": 5000000},
+            {"id": "uuid-2", "symbol": "ETH", "amount_usd": 3000000},
+        ]
+        mock_supabase.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = mock_result
+
+        result = get_unsent_alerts()
+
+        assert len(result) == 2
+        assert result[0]["id"] == "uuid-1"
+
+    @patch("whale_monitor.supabase")
+    def test_no_unsent_alerts(self, mock_supabase):
+        """미발송 건이 없을 때 빈 리스트 반환"""
+        from whale_monitor import get_unsent_alerts
+
+        mock_result = MagicMock()
+        mock_result.data = []
+        mock_supabase.table.return_value.select.return_value.eq.return_value.order.return_value.limit.return_value.execute.return_value = mock_result
+
+        result = get_unsent_alerts()
+        assert result == []
+
+    @patch("whale_monitor.supabase")
+    def test_db_error_returns_empty(self, mock_supabase):
+        """DB 조회 실패 시 빈 리스트 반환 (에러로 죽지 않음)"""
+        from whale_monitor import get_unsent_alerts
+
+        mock_supabase.table.side_effect = Exception("DB connection failed")
+
+        result = get_unsent_alerts()
+        assert result == []

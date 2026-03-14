@@ -87,10 +87,12 @@ def get_push_recipients(amount_usd: float) -> list[dict]:
     - FREE 사용자: $500만 이상 거래만 알림 (과도한 알림 방지)
     - BASIC/PRO 사용자: $100만 이상 거래부터 알림
 
+    개선: 사용자 + 구독을 2번의 DB 호출로 처리 (기존 N+1 문제 해결)
+
     반환값: [{"expo_push_token": "ExponentPushToken[xxx]", "plan": "free"}, ...]
     """
     try:
-        # 1단계: 푸시 가능한 사용자 조회
+        # 1단계: 푸시 가능한 사용자 조회 (DB 호출 1회)
         # - expo_push_token이 있고 (앱에서 알림 허용한 사용자)
         # - push_enabled = true (알림 끄지 않은 사용자)
         # - notify_whale_min_usd <= 이번 거래 금액 (개인 설정 기준 충족)
@@ -107,26 +109,34 @@ def get_push_recipients(amount_usd: float) -> list[dict]:
             print("[푸시] 알림 받을 사용자 없음")
             return []
 
-        # 2단계: 각 사용자의 구독 상태 확인해서 등급별 필터링
+        user_ids = [user["id"] for user in users_result.data]
+
+        # 2단계: 해당 사용자들의 활성 구독을 한 번에 조회 (DB 호출 1회)
+        # → 기존: 사용자마다 1번씩 = N번 호출 (느림)
+        # → 개선: user_id IN (...) 으로 1번에 전부 가져옴 (빠름)
+        subs_result = (
+            supabase.table("subscriptions")
+            .select("user_id, plan")
+            .in_("user_id", user_ids)
+            .eq("status", "active")
+            .order("expires_at", desc=True)
+            .execute()
+        )
+
+        # 사용자별 최신 구독 플랜 매핑 (같은 user_id가 여러 개면 첫 번째 = 최신)
+        user_plan_map = {}
+        for sub in (subs_result.data or []):
+            uid = sub["user_id"]
+            if uid not in user_plan_map:  # 첫 번째(최신)만 사용
+                user_plan_map[uid] = sub["plan"]
+
+        # 3단계: 등급별 금액 기준 필터링
         recipients = []
         for user in users_result.data:
             user_id = user["id"]
 
-            # 사용자의 현재 활성 구독 조회
-            sub_result = (
-                supabase.table("subscriptions")
-                .select("plan")
-                .eq("user_id", user_id)
-                .eq("status", "active")
-                .order("expires_at", desc=True)
-                .limit(1)
-                .execute()
-            )
-
             # 구독이 없으면 FREE로 간주
-            plan = "free"
-            if sub_result.data:
-                plan = sub_result.data[0].get("plan", "free")
+            plan = user_plan_map.get(user_id, "free")
 
             # 등급별 금액 기준 체크
             if plan == "free" and amount_usd < FREE_USER_MIN_USD:
