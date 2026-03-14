@@ -160,3 +160,22 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
+@app.get("/debug-env")
+async def debug_env():
+    """환경변수 이름 목록 (값 제외)"""
+    import os
+    keys = [
+        "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY",
+        "GOOGLE_AI_API_KEY", "OPENAI_API_KEY", "XAI_API_KEY",
+        "ANTHROPIC_API_KEY", "NEWSAPI_KEY", "TWITTER_API_KEY",
+        "GEMINI_API_KEY", "GOOGLE_API_KEY"
+    ]
+    result = {}
+    for k in keys:
+        val = os.getenv(k)
+        if val:
+            result[k] = f"SET ({len(val)}chars)"
+        else:
+            result[k] = "NOT SET"
+    return result
