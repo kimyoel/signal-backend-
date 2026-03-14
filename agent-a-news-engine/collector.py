@@ -26,6 +26,7 @@ import google.generativeai as genai
 from db import (
     get_supabase_client,
     check_duplicate_url,
+    check_duplicate_urls_batch,
     save_news_batch,
 )
 from sources import load_rss_sources, NEWSAPI_KEYWORDS
@@ -285,21 +286,30 @@ async def fetch_newsapi() -> list[dict]:
 # ──────────────────────────────────────────
 
 async def remove_duplicates(news_items: list[dict]) -> list[dict]:
-    """source_url 기준 중복 제거 (DB + 이번 배치 내부)"""
+    """source_url 기준 중복 제거 (배치 IN 쿼리 — N번 개별 조회 대신 1번으로 처리)"""
     supabase = get_supabase_client()
-    unique = []
-    seen_urls = set()
 
+    # 1. 배치 내부 중복 먼저 제거 (set으로 O(1) 처리)
+    seen_urls: set[str] = set()
+    deduped_batch: list[dict] = []
     for item in news_items:
         url = item.get("source_url", "")
-        if not url or url in seen_urls:
-            continue
-        is_dup = await check_duplicate_url(supabase, url)
-        if not is_dup:
-            unique.append(item)
+        if url and url not in seen_urls:
             seen_urls.add(url)
+            deduped_batch.append(item)
 
-    logger.info(f"[중복제거] {len(news_items)}개 → {len(unique)}개")
+    if not deduped_batch:
+        logger.info(f"[중복제거] {len(news_items)}개 → 0개")
+        return []
+
+    # 2. DB 중복 체크: 전체 URL 목록을 1번 IN 쿼리로 확인
+    all_urls = [item["source_url"] for item in deduped_batch]
+    existing_urls = await check_duplicate_urls_batch(supabase, all_urls)
+
+    # 3. DB에 없는 것만 통과
+    unique = [item for item in deduped_batch if item["source_url"] not in existing_urls]
+
+    logger.info(f"[중복제거] {len(news_items)}개 → {len(unique)}개 (DB 조회 1회로 처리)")
     return unique
 
 
