@@ -40,7 +40,7 @@ async def get_active_sources(supabase: Client) -> list:
 
 
 async def check_duplicate_url(supabase: Client, source_url: str) -> bool:
-    """이미 수집된 뉴스인지 source_url로 중복 체크 (단건 — 하위호환용)
+    """이미 수집된 뉴스인지 source_url로 중복 체크
     - True면 이미 있음 (중복)
     - False면 새 뉴스
     """
@@ -52,20 +52,27 @@ async def check_duplicate_url(supabase: Client, source_url: str) -> bool:
 
 
 async def check_duplicate_urls_batch(supabase: Client, source_urls: list[str]) -> set[str]:
-    """여러 URL을 한 번의 IN 쿼리로 중복 체크 (배치 버전)
-    - N번 개별 쿼리 → 1번 IN 쿼리로 최대 500배 빠름
-    - 반환: 이미 DB에 있는 URL 집합 (set)
+    """여러 URL을 한 번의 DB 쿼리로 중복 체크 (배치 버전)
+    - 반환: DB에 이미 존재하는 URL들의 set
+    - 500개 기준 기존 500번 쿼리 → 1번 쿼리로 대폭 단축
     """
     if not source_urls:
         return set()
 
-    # Supabase에서 IN 쿼리: .in_("source_url", [...])
-    response = supabase.table("news") \
-        .select("source_url") \
-        .in_("source_url", source_urls) \
-        .execute()
+    # Supabase in() 필터로 한 번에 조회
+    # URL이 너무 많으면 쿼리 URL 길이 초과 → 200개씩 청크 처리
+    CHUNK_SIZE = 200
+    existing = set()
 
-    existing = {row["source_url"] for row in (response.data or [])}
+    for i in range(0, len(source_urls), CHUNK_SIZE):
+        chunk = source_urls[i:i + CHUNK_SIZE]
+        response = supabase.table("news") \
+            .select("source_url") \
+            .in_("source_url", chunk) \
+            .execute()
+        for row in response.data:
+            existing.add(row["source_url"])
+
     return existing
 
 
