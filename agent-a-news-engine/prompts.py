@@ -1,10 +1,11 @@
 # ─────────────────────────────────────────
-# prompts.py — AI 프롬프트 모음 v2.0
+# prompts.py — AI 프롬프트 모음 v2.1
 # 에이전트 A가 사용하는 모든 AI 프롬프트를 한 곳에서 관리
 #
 # 변경 이력:
 # v1.0 - 초기 버전 (숫자만 반환, 기준 모호)
 # v2.0 - JSON 출력 강제, few-shot 예시 추가, 콘텐츠 타입별 채점 기준 분리
+# v2.1 - TRANSLATE_SUMMARIZE_PROMPT 개선: 메타 서술 금지, 실제 내용 요약 강제
 # ─────────────────────────────────────────
 
 # ═══════════════════════════════════════════════════════════
@@ -39,7 +40,7 @@
 # ──────────────────────────────────────────
 # 1-A. 일반 뉴스 중요도 채점 (Gemini Flash-Lite)
 # 입력: RSS/NewsAPI에서 수집한 뉴스
-# 출력: JSON {"score": 1~5, "reason": "한 줄 이유"}
+# 출력: JSON {\"score\": 1~5, \"reason\": \"한 줄 이유\"}
 # ──────────────────────────────────────────
 NEWS_SCORING_PROMPT = """You are a financial news importance scorer for crypto and macro investors.
 
@@ -76,13 +77,14 @@ Title: {title}
 Content preview: {content_preview}
 
 Respond ONLY with valid JSON in this exact format:
-{{"score": <integer 1-5>, "reason": "<one sentence in Korean explaining why>"}}"""
+{{"score": <integer 1-5>, "reason": "<one sentence in Korean explaining why>"}}\
+"""
 
 
 # ──────────────────────────────────────────
 # 1-B. 애널리스트/인플루언서 Substack 채점 (Gemini Flash-Lite)
 # 입력: Substack RSS에서 수집한 애널리스트 글
-# 출력: JSON {"score": 1~5, "reason": "한 줄 이유"}
+# 출력: JSON {\"score\": 1~5, \"reason\": \"한 줄 이유\"}
 # 특이점: 일반 뉴스보다 threshold 낮게 (3점도 가치있음)
 # ──────────────────────────────────────────
 ANALYST_SCORING_PROMPT = """You are scoring a financial analyst or influencer article for crypto/macro investors.
@@ -118,13 +120,14 @@ Title: {title}
 Content preview: {content_preview}
 
 Respond ONLY with valid JSON in this exact format:
-{{"score": <integer 1-5>, "reason": "<one sentence in Korean explaining why>"}}"""
+{{"score": <integer 1-5>, "reason": "<one sentence in Korean explaining why>"}}\
+"""
 
 
 # ──────────────────────────────────────────
 # 1-C. 트위터/X 인플루언서 트윗 채점 (Gemini Flash-Lite)
 # 입력: twitterapi.io에서 수집한 트윗
-# 출력: JSON {"score": 1~5, "reason": "한 줄 이유"}
+# 출력: JSON {\"score\": 1~5, \"reason\": \"한 줄 이유\"}
 # 특이점: 짧은 텍스트, 맥락 파악 중요, 밈/슬랭 고려
 # ──────────────────────────────────────────
 TWITTER_SCORING_PROMPT = """You are scoring a tweet from a crypto/macro influencer for investment relevance.
@@ -181,26 +184,45 @@ Author: @{username}
 Tweet: {tweet_text}
 
 Respond ONLY with valid JSON in this exact format:
-{{"score": <integer 1-5>, "reason": "<one sentence in Korean explaining why>"}}"""
+{{"score": <integer 1-5>, "reason": "<one sentence in Korean explaining why>"}}\
+"""
 
 
 # ──────────────────────────────────────────
-# 2. 번역 + 요약 프롬프트 (Gemini Flash)
+# 2. 번역 + 요약 프롬프트 (Gemini Flash) — v2.1 개선
 # - 영문 뉴스 → 한국어 번역 + 1~2문장 요약
 # - 이미 한국어인 뉴스는 요약만 수행
+#
+# ⚠️ 핵심 수정 (v2.1):
+#   이전 버전에서 AI가 "이 기사는 ~에 관한 내용입니다" 같은
+#   메타 서술(무슨 글인지 설명)을 생성하는 문제 수정.
+#   → 실제 사건/수치/사실을 직접 서술하도록 강제.
 # ──────────────────────────────────────────
-TRANSLATE_SUMMARIZE_PROMPT = """다음 뉴스/콘텐츠를 한국어로 번역하고 핵심을 1~2문장으로 요약하라.
+TRANSLATE_SUMMARIZE_PROMPT = """다음 뉴스/콘텐츠를 한국어로 번역하고 핵심 내용을 1~2문장으로 요약하라.
 
 규칙:
 - 이미 한국어라면 요약만 수행
 - 번역은 자연스러운 한국 투자자 언어로 (직역 금지)
-- 요약은 투자자 관점의 핵심 정보만 포함
+- 요약은 실제 일어난 일, 발표된 수치, 구체적 사실을 직접 서술할 것
 - 과장 표현, 투자 권유 표현 금지
+
+⛔ 절대 금지 — 메타 서술 패턴 (글이 무엇인지 설명하는 방식):
+  "이 기사는 ~에 관한 내용입니다"
+  "이 뉴스는 ~를 다루고 있습니다"
+  "~에 대한 분석 글입니다"
+  "~을 설명하는 기사입니다"
+
+✅ 올바른 요약 패턴 (실제 내용을 직접 서술):
+  나쁜 예: "이 기사는 연준의 금리 인상에 관한 내용입니다."
+  좋은 예: "연준이 기준금리를 0.5%p 인상해 5.25~5.5%로 올렸다. 추가 인상 가능성도 시사했다."
+
+  나쁜 예: "이 트윗은 BTC 매수에 관한 Saylor의 트윗입니다."
+  좋은 예: "Saylor가 MicroStrategy 명의로 BTC 5,000개($4.2억)를 추가 매수했다고 공개했다."
 
 출력 형식 (반드시 JSON):
 {{
-  "title_ko": "한국어 제목 (명확하고 간결하게)",
-  "summary_ko": "1~2문장 핵심 요약 (투자자 관점)"
+  "title_ko": "한국어 제목 (명확하고 간결하게, 핵심 사실 포함)",
+  "summary_ko": "1~2문장 요약 — 실제 수치·사실·결과를 직접 서술"
 }}
 
 원문 제목: {title}
