@@ -135,13 +135,26 @@ def format_twitter_post(news: dict) -> str:
 
     hashtags = get_hashtags(category, "twitter")
 
+    # 원문 (title_original = 영어 원문)
+    tweet_original = news.get("title_original", "")
+    if len(tweet_original) > 300:
+        tweet_original = tweet_original[:300] + "..."
+
     lines = [
         f"{importance_emoji} SIGNAL | 인플루언서 인사이트",
         f"",
         f"💬 {source}:",
-        f'"{tweet_text}"',
-        f"",
     ]
+
+    # 원문이 있고 한글 번역(tweet_text)과 다르면 병기
+    if tweet_original and tweet_original != tweet_text:
+        lines.append(f'"{tweet_original}"')
+        lines.append(f"")
+        lines.append(f"🇰🇷 {tweet_text}")
+    else:
+        lines.append(f'"{tweet_text}"')
+
+    lines.append("")
 
     if source_url:
         lines.append(f"🔗 {source_url}")
@@ -257,7 +270,7 @@ async def poll_and_post():
         # importance>=3 & posted_to_threads=false 뉴스 조회 (최대 5건/회)
         result = (
             supabase.table("news")
-            .select("id, title, summary, source, source_url, category, importance, content_type")
+            .select("id, title, title_original, summary, source, source_url, category, importance, content_type")
             .gte("importance", 3)
             .eq("posted_to_threads", False)
             .order("published_at", desc=False)
