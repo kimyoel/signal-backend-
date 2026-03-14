@@ -23,10 +23,12 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
 # ──────────────────────────────────────────────
-# Whale Alert API (고래 거래 감지)
+# Bitquery API (고래 거래 감지 - Whale Alert 대체)
+# 무료 Developer Plan: https://bitquery.io
+# GraphQL API v2 엔드포인트 사용
 # ──────────────────────────────────────────────
-WHALE_ALERT_API_KEY = os.getenv("WHALE_ALERT_API_KEY", "")
-WHALE_ALERT_BASE_URL = "https://api.whale-alert.io/v1/transactions"
+BITQUERY_API_KEY = os.getenv("BITQUERY_API_KEY", "")
+BITQUERY_API_URL = "https://streaming.bitquery.io/graphql"
 
 # 최소 감지 금액 (USD) — 이 금액 이상의 거래만 가져옴
 WHALE_MIN_VALUE_USD = 1_000_000  # $100만
@@ -64,7 +66,7 @@ def validate_config():
     required = {
         "SUPABASE_URL": SUPABASE_URL,
         "SUPABASE_SERVICE_ROLE_KEY": SUPABASE_SERVICE_ROLE_KEY,
-        "WHALE_ALERT_API_KEY": WHALE_ALERT_API_KEY,
+        "BITQUERY_API_KEY": BITQUERY_API_KEY,
         "EXPO_ACCESS_TOKEN": EXPO_ACCESS_TOKEN,
     }
 
@@ -80,6 +82,7 @@ def validate_config():
         print("💡 해결 방법:")
         print("  1. .env 파일을 만들고 값을 채워넣으세요 (.env.example 참고)")
         print("  2. Railway 배포 시에는 환경변수 탭에서 설정하세요")
+        print("  3. BITQUERY_API_KEY: https://bitquery.io 에서 무료 발급")
         print("=" * 50)
         return False
 
