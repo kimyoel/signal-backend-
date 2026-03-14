@@ -160,7 +160,7 @@ async def post_news_to_threads(news: dict) -> Optional[str]:
 
 async def poll_and_post():
     """
-    news 테이블에서 importance=5 & posted_to_threads=false 항목을 찾아
+    news 테이블에서 importance>=4 & posted_to_threads=false 항목을 찾아
     Threads에 포스팅하고 posted_to_threads=true로 업데이트
     """
     if not supabase:
@@ -175,11 +175,12 @@ async def poll_and_post():
     state["running"] = True
 
     try:
-        # importance=5 & posted_to_threads=false 뉴스 조회 (최대 5건/회)
+        # importance>=4 & posted_to_threads=false 뉴스 조회 (최대 5건/회)
+        # news: 4점+, twitter/analyst: 3점+ (content_type별 threshold)
         result = (
             supabase.table("news")
-            .select("id, title, summary, source, source_url, category, importance")
-            .eq("importance", 5)
+            .select("id, title, summary, source, source_url, category, importance, content_type")
+            .gte("importance", 4)
             .eq("posted_to_threads", False)
             .order("published_at", desc=False)
             .limit(5)
