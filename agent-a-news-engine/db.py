@@ -53,22 +53,44 @@ async def check_duplicate_url(supabase: Client, source_url: str) -> bool:
 
 async def save_news(supabase: Client, news_data: dict) -> dict:
     """뉴스를 news 테이블에 저장하는 함수
-    - news_data는 DB 스키마(01_db_schema.md)의 컬럼명과 일치해야 함
+    - content_type 컬럼이 없으면 자동으로 제거 (하위호환)
     """
-    response = supabase.table("news") \
-        .insert(news_data) \
-        .execute()
-    return response.data[0] if response.data else {}
+    # content_type 컬럼이 스키마에 없는 경우 대비
+    safe_data = {k: v for k, v in news_data.items() if k != "content_type"}
+    try:
+        response = supabase.table("news") \
+            .insert(news_data) \
+            .execute()
+        return response.data[0] if response.data else {}
+    except Exception:
+        # content_type 컬럼 없을 경우 fallback
+        response = supabase.table("news") \
+            .insert(safe_data) \
+            .execute()
+        return response.data[0] if response.data else {}
 
 
 async def save_news_batch(supabase: Client, news_list: list[dict]) -> list:
-    """여러 뉴스를 한 번에 저장하는 함수 (배치 처리)"""
+    """여러 뉴스를 한 번에 저장하는 함수 (배치 처리)
+    - content_type 컬럼 없을 경우 자동 fallback
+    """
     if not news_list:
         return []
-    response = supabase.table("news") \
-        .insert(news_list) \
-        .execute()
-    return response.data
+    try:
+        response = supabase.table("news") \
+            .insert(news_list) \
+            .execute()
+        return response.data
+    except Exception as e:
+        err_str = str(e)
+        # content_type 컬럼 미존재 오류면 해당 필드 제거 후 재시도
+        if "content_type" in err_str or "PGRST204" in err_str:
+            safe_list = [{k: v for k, v in item.items() if k != "content_type"} for item in news_list]
+            response = supabase.table("news") \
+                .insert(safe_list) \
+                .execute()
+            return response.data
+        raise
 
 
 # ──────────────────────────────────────────
